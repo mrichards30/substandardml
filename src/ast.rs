@@ -1,11 +1,14 @@
 use std::fmt;
+use chumsky::span::Spanned;
 use im::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token<'src> {
     Ident(&'src str),
     Num(f64),
-    Parens(Vec<Self>),
+    Parens(Vec<Spanned<Self>>),
+    Colon,
+    Semicolon,
 
     // Ops
     Eq,
@@ -36,6 +39,8 @@ impl fmt::Display for Token<'_> {
             Token::Ident(x) => write!(f, "{x}"),
             Token::Num(x) => write!(f, "{x}"),
             Token::Parens(_) => write!(f, "(...)"),
+            Token::Colon => write!(f, ":"),
+            Token::Semicolon => write!(f, ";"),
             Token::Eq => write!(f, "="),
             Token::Plus => write!(f, "+"),
             Token::Asterisk => write!(f, "*"),
