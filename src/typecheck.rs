@@ -1,3 +1,4 @@
+use chumsky::prelude::Spanned;
 use crate::ast::{BinOp, Decl, Expr, Type, TypeEnv, TypeError};
 
 pub fn typecheck(decl: &Decl, env: &TypeEnv) -> Result<Type, TypeError> {
@@ -8,29 +9,33 @@ pub fn typecheck(decl: &Decl, env: &TypeEnv) -> Result<Type, TypeError> {
     }
 }
 
-pub fn typecheck_expr(expr: &Expr, env: &TypeEnv) -> Result<Type, TypeError> {
-    match expr {
-        Expr::Var(name) => 
-            env.get(name).cloned()
-            .ok_or_else(|| TypeError::UnboundVariable(name.clone())),
-        Expr::Int(_) => Ok(Type::Int),
+pub fn typecheck_expr(expr: &Spanned<Expr>, env: &TypeEnv) -> Result<Type, TypeError> {
+    match &expr.inner {
+        Expr::Var(name) =>
+            env.get(String::from(name)).cloned()
+            .ok_or_else(|| TypeError::UnboundVariable(name.to_string())),
+        Expr::Num(_) => Ok(Type::Num),
         Expr::Bool(_) => Ok(Type::Bool),
         Expr::Unit => Ok(Type::Unit),
         Expr::If(cond_, then_, else_) => {
-            let cond_type = typecheck_expr(cond_, env)?;
+            let cond_type = typecheck_expr(&**cond_, env)?;
             if cond_type != Type::Bool {
                 return Err(TypeError::TypeMismatch { expected: Type::Bool, found: cond_type });
             }
-            let then_type = typecheck_expr(then_, env)?;
-            let else_type = typecheck_expr(else_, env)?;
+            let then_type = typecheck_expr(&**then_, env)?;
+            let else_type = typecheck_expr(&**else_, env)?;
             if then_type != else_type {
                 return Err(TypeError::TypeMismatch { expected: then_type, found: else_type });
             }
             Ok(then_type)
         }
         Expr::Fn(v, ty, body) => {
-            let body_ty = typecheck_expr(body, &env.update(v.clone(), ty.clone()))?;
-            Ok(Type::Fn(Box::new(ty.clone()), Box::new(body_ty)))
+            let ty_inferred = typecheck_expr(&**body, env)?;
+            match ty {
+                None => Ok(ty_inferred),
+                Some(ty_provided) if *ty_provided == ty_inferred => Ok(ty_provided.clone()),
+                Some(ty_provided) => Err(TypeError::TypeMismatch { expected: ty_inferred, found: ty_provided.clone() })
+            }
         }
         Expr::App(e1, e2) => {
             let t1 = typecheck_expr(e1, env)?;
@@ -54,20 +59,20 @@ pub fn typecheck_expr(expr: &Expr, env: &TypeEnv) -> Result<Type, TypeError> {
             let t1 = typecheck_expr(e1, env)?;
             let t2 = typecheck_expr(e2, env)?;
             match (t1, t2) {
-                (Type::Int, Type::Int) => match op {
+                (Type::Num, Type::Num) => match &op.inner {
                     BinOp::Eq | BinOp::Neq | BinOp::Geq | BinOp::Gt | BinOp::Leq | BinOp::Lt => Ok(Type::Bool),
-                    BinOp::Plus | BinOp::Minus | BinOp::Times | BinOp::Div => Ok(Type::Int),
+                    BinOp::Plus | BinOp::Minus | BinOp::Times | BinOp::Div => Ok(Type::Num),
                 },
-                (Type::Int, t) => Err(TypeError::TypeMismatch { expected: Type::Int, found: t }),
-                (t, _) => Err(TypeError::TypeMismatch { expected: Type::Int, found: t }),
+                (Type::Num, t) => Err(TypeError::TypeMismatch { expected: Type::Num, found: t }),
+                (t, _) => Err(TypeError::TypeMismatch { expected: Type::Num, found: t }),
             }
         }
-        Expr::LetIn(x, ty, body, in_) => {
-            let ty_found = typecheck_expr(body, env)?;
-            if ty.clone() == ty_found {
-                typecheck_expr(in_, &env.update(x.clone(), ty.clone()))
-            } else {
-                Err(TypeError::TypeMismatch { expected: ty.clone(), found: ty_found })
+        Expr::LetIn(_, ty, body, _) => {
+            let ty_inferred = typecheck_expr(body, env)?;
+            match ty {
+                None => Ok(ty_inferred),
+                Some(ty_provided) if *ty_provided == ty_inferred => Ok(ty_provided.clone()),
+                Some(ty_provided) => Err(TypeError::TypeMismatch { expected: ty_inferred, found: ty_provided.clone() })
             }
         }
     }

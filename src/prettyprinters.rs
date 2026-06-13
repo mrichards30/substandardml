@@ -4,7 +4,7 @@ pub fn print_value(val: &Value) -> String {
     match val {
         Value::Var(n) => n.clone(),
         Value::Label(l) => l.clone(),
-        Value::Int(n) => n.to_string(),
+        Value::Num(n) => n.to_string(),
         Value::String(s) => format!("\"{}\"", s),
     }
 }

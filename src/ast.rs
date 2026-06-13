@@ -21,6 +21,8 @@ pub enum Token<'src> {
     Minus,
     Asterisk,
     Slash,
+    ThickArrow,
+    ThinArrow,
 
     // Keywords
     Let,
@@ -58,14 +60,16 @@ impl fmt::Display for Token<'_> {
             Token::Slash => write!(f, "/"),
             Token::If => write!(f, "if"),
             Token::Then => write!(f, "then"),
-            Token::Else => write!(f, "else")
+            Token::Else => write!(f, "else"),
+            Token::ThickArrow => write!(f, "=>"),
+            Token::ThinArrow => write!(f, "->"),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
-    Int,
+    Num,
     Bool,
     Unit,
     Fn(Box<Type>, Box<Type>),
@@ -73,10 +77,10 @@ pub enum Type {
 }
 
 #[derive(Debug, Clone)]
-pub enum Decl {
-    Let(String, Type, Expr),
-    LetRec(String, Type, Expr),
-    Expr(Expr),
+pub enum Decl<'src> {
+    Let(String, Type, Spanned<Expr<'src>>),
+    LetRec(String, Type, Spanned<Expr<'src>>),
+    Expr(Spanned<Expr<'src>>),
 }
 
 #[derive(Debug, Clone)]
@@ -86,17 +90,17 @@ pub enum BinOp {
 }
 
 #[derive(Debug, Clone)]
-pub enum Expr {
-    Var(String),
-    Int(i64),
+pub enum Expr<'src> {
+    Var(&'src str),
+    Num(f64),
     Bool(bool),
     Unit,
-    If(Box<Self>, Box<Self>, Box<Self>),
-    LetIn(String, Option<Type>, Box<Self>, Box<Self>),
-    Fn(String, Option<Type>, Box<Self>),
-    App(Box<Self>, Box<Self>),
-    Seq(Box<Decl>, Box<Self>),
-    BinOp(BinOp, Box<Self>, Box<Self>),
+    If(Box<Spanned<Self>>, Box<Spanned<Self>>, Box<Spanned<Self>>),
+    LetIn(Spanned<&'src str>, Option<Type>, Box<Spanned<Self>>, Box<Spanned<Self>>),
+    Fn(Spanned<&'src str>, Option<Type>, Box<Spanned<Self>>),
+    App(Box<Spanned<Self>>, Box<Spanned<Self>>),
+    Seq(Box<Decl<'src>>, Box<Spanned<Self>>),
+    BinOp(Spanned<BinOp>, Box<Spanned<Self>>, Box<Spanned<Self>>),
 }
 
 pub type TypeEnv = HashMap<String, Type>;
@@ -112,7 +116,7 @@ pub enum TypeError {
 pub enum Value {
     Var(String),
     Label(String),
-    Int(i64),
+    Num(f64),
     String(String),
 }
 

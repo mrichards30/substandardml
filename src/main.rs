@@ -1,7 +1,14 @@
 use compiler::parser;
 
 fn main() {
-    println!("{:?}", parser::prs("let x: int = 5 in x"));
+    println!("{:?}", parser::prs("let x: num = 5 in x + 1"));
+    println!("{:?}", parser::prs("let x: bool = true in if x then true else false"));
+    println!("{:?}", parser::prs("fn x: bool => if x then true else false"));
+    println!("{:?}", parser::prs("fn x => if x then true else false"));
+    println!("{:?}", parser::prs("fn x: num => if x >= 5 then true else false"));
+    println!("{:?}", parser::prs("(fn x: num => if x >= 5 then true else false) 6"));
+    println!("{:?}", parser::prs("(fn x: num => if x >= 5 then true else false)(6)"));
+    println!("{:?}", parser::prs("(fn x: num => if x >= 5 then true else false)6"));
 
     // match typecheck(&parser::prs("(fn x: int => x) 5").unwrap(), &TypeEnv::new()) {
     //     Ok(ty) => println!("type: {:?}", ty),
