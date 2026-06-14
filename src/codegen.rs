@@ -27,7 +27,7 @@ pub fn gen_binop(op: BinOp) -> String {
 pub fn gen_cexpr(expr: &CExpr) -> String {
     match expr {
         CExpr::App(f, xs) =>
-            format!("{}({})", gen_value(f), xs.iter().map(gen_value).collect::<Vec<_>>().join(", ")),
+            format!("{}({})", gen_value(f), xs.iter().map(|x| gen_value(&x.inner)).collect::<Vec<_>>().join(", ")),
         CExpr::Fix(vs, body) =>
             format!("{}\n{}",
                     vs.iter().map(|(f, params, b)| {
@@ -35,7 +35,7 @@ pub fn gen_cexpr(expr: &CExpr) -> String {
                     }).collect::<Vec<_>>().join("\n"),
                     gen_cexpr(body)),
         CExpr::PrimOp(op, inputs, outputs, cs) => {
-            let val = inputs.iter().map(gen_value).collect::<Vec<_>>().join(&format!(" {} ", gen_binop(op.clone())));
+            let val = inputs.iter().map(gen_value).collect::<Vec<_>>().join(&format!(" {} ", gen_binop(op.inner.clone())));
             if cs.len() == 2 {
                 format!("if ({}) {{ {} }} else {{ {} }}", val, gen_cexpr(&cs[1]), gen_cexpr(&cs[0]))
             } else {

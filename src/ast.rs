@@ -122,8 +122,8 @@ pub enum Value {
 
 #[derive(Debug, Clone)]
 pub enum CExpr {
-    App(Value, Vec<Value>),
-    Fix(Vec<(String, Vec<String>, Box<CExpr>)>, Box<CExpr>),
-    PrimOp(BinOp, Vec<Value>, Vec<String>, Vec<CExpr>),
-    Switch(Value, Vec<CExpr>),
+    App(Spanned<Value>, Vec<Spanned<Value>>),
+    Fix(Vec<(String, Vec<String>, Box<Spanned<Self>>)>, Box<Spanned<Self>>),
+    PrimOp(Spanned<BinOp>, Vec<Value>, Vec<String>, Vec<Spanned<Self>>),
+    Switch(Spanned<Value>, Vec<Spanned<Self>>),
 }

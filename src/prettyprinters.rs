@@ -12,7 +12,7 @@ pub fn print_value(val: &Value) -> String {
 pub fn print_cexpr(expr: &CExpr) -> String {
     match expr {
         CExpr::App(f, args) => {
-            let args_str = args.iter().map(print_value).collect::<Vec<_>>().join(", ");
+            let args_str = args.iter().map(|x| print_value(&x.inner)).collect::<Vec<_>>().join(", ");
             format!("APP({}, [{}])", print_value(f), args_str)
         }
         CExpr::Fix(fs, body) => {
