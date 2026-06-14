@@ -4,7 +4,7 @@ use chumsky::input::MappedInput;
 use chumsky::prelude::*;
 use chumsky::span::Spanned;
 use std::fmt;
-use chumsky::pratt::{infix, left};
+use chumsky::pratt::{infix, left, prefix};
 
 // adapted from https://codeberg.org/zesterer/chumsky/src/branch/main/examples/mini_ml.rs
 
@@ -65,11 +65,16 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
 > {
     recursive(|expr| {
         let ident = select_ref! { Token::Ident(x) => *x };
-        let parse_type = select_ref! {
-            Token::Ident("num") => Type::Num,
-            Token::Ident("unit") => Type::Unit,
-            Token::Ident("bool") => Type::Bool
-        };
+        let parse_type = recursive(|typ| {
+            choice((just(Token::Ident("num")).to(Type::Num),
+                    just(Token::Ident("bool")).to(Type::Bool),
+                    just(Token::Ident("unit")).to(Type::Unit),
+                    typ.nested_in(select_ref! { Token::Parens(ts) = e => ts.split_spanned(e.span()) }),
+            )).pratt(
+                infix(left(1), just(Token::ThinArrow).map_with(|_, e| e.span()), |l, op, r, e|
+                    Type::Fn(Box::new(l), Box::new(r)))
+            )
+        });
         let atom = choice((
             select_ref! { Token::Num(x) => Expr::Num(*x) }.spanned(),
             just(Token::True).to(Expr::Bool(true)).spanned(),
@@ -78,7 +83,7 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
             // let x = y in z
             just(Token::Let)
                 .ignore_then(ident.spanned())
-                .then(just(Token::Colon).ignore_then(parse_type).or_not())
+                .then(just(Token::Colon).ignore_then(parse_type.clone()).or_not())
                 .then_ignore(just(Token::Eq))
                 .then(expr.clone())
                 .then_ignore(just(Token::In))
@@ -89,7 +94,7 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
             // fn x: typ => y
             just(Token::Fn)
                 .ignore_then(ident.spanned())
-                .then(just(Token::Colon).ignore_then(parse_type).or_not())
+                .then(just(Token::Colon).ignore_then(parse_type.clone()).or_not())
                 .then_ignore(just(Token::ThickArrow))
                 .then(expr.clone())
                 .map(|((lhs, typ), rhs)|
@@ -128,8 +133,10 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
                 Expr::BinOp(BinOp::Eq.with_span(op), Box::new(l), Box::new(r)).with_span(e.span())),
             infix(left(1), just(Token::Neq).map_with(|_, e| e.span()), |l, op, r, e|
                 Expr::BinOp(BinOp::Neq.with_span(op), Box::new(l), Box::new(r)).with_span(e.span())),
-            infix(left(1), empty(), |l, op, r, e|
+            infix(left(1), empty(), |l, _, r, e|
                 Expr::App(Box::new(l), Box::new(r)).with_span(e.span())),
+            prefix(1, just(Token::Minus), |_, body, e|
+                Expr::Neg(Box::new(body)).with_span(e.span())),
         ))
     })
 }
@@ -175,7 +182,7 @@ fn parse_failure(err: &Rich<impl fmt::Display>, src: &str) -> ! {
     )
 }
 
-pub fn prs(src: &str) -> Spanned<Expr> {
+pub fn prs(src: &str) -> Spanned<Expr<'_>> {
     let tokens = lexer()
         .parse(src)
         .into_result()

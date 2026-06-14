@@ -100,6 +100,7 @@ pub enum Expr<'src> {
     Fn(Spanned<&'src str>, Option<Type>, Box<Spanned<Self>>),
     App(Box<Spanned<Self>>, Box<Spanned<Self>>),
     Seq(Box<Decl<'src>>, Box<Spanned<Self>>),
+    Neg(Box<Spanned<Self>>),
     BinOp(Spanned<BinOp>, Box<Spanned<Self>>, Box<Spanned<Self>>),
 }
 

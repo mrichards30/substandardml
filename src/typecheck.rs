@@ -30,14 +30,11 @@ pub fn typecheck_expr(expr: &Spanned<Expr>, env: &TypeEnv) -> Result<Type, TypeE
             Ok(then_type)
         }
         Expr::Fn(v, ty, body) => {
-            let ty_inferred = typecheck_expr(&**body, env)?;
             match ty {
-                Some(ty_provided) if *ty_provided == ty_inferred => {
-                    let ty_body = typecheck_expr(body, &env.update(v.to_string(), ty_provided.clone()))?;
+                Some(ty_provided) => {
+                    let ty_body = typecheck_expr(&**body, &env.update(v.to_string(), ty_provided.clone()))?;
                     Ok(Type::Fn(Box::new(ty_provided.clone()), Box::new(ty_body)))
                 }
-                Some(ty_provided) =>
-                    Err(TypeError::TypeMismatch { expected: ty_provided.clone(), found: ty_inferred }),
                 None => panic!("not yet implemented: please label types in fn!"),
             }
         }
@@ -71,6 +68,7 @@ pub fn typecheck_expr(expr: &Spanned<Expr>, env: &TypeEnv) -> Result<Type, TypeE
                 (t, _) => Err(TypeError::TypeMismatch { expected: Type::Num, found: t }),
             }
         }
+        Expr::Neg(e) => typecheck_expr(e, env),
         Expr::LetIn(v, ty, body, in_) => {
             let ty_inferred = typecheck_expr(body, env)?;
             let v_ty = match ty {

@@ -20,18 +20,17 @@ fn test_if() {
 
 #[test]
 fn test_fn() {
-    assert_eq!(node::run("(fn x: int => x) 3"), "3");
-    assert_eq!(node::run("(fn x: int => if x >= 0 then true else false) 6"), "1");
-    assert_eq!(node::run("(fn x: int => if x >= 0 then true else false) (-4)"), "0");
+    assert_eq!(node::run("(fn x: num => x) 3"), "3");
+    assert_eq!(node::run("(fn x: num => if x >= 0 then true else false) 6"), "1");
+    assert_eq!(node::run("(fn x: num => if x >= 0 then true else false) (-4)"), "0");
 }
 
 #[test]
 fn test_let() {
-    assert_eq!(node::run("let x: int = 5 in x"), "5");
-    // assert_eq!(node::run("let x: int = 5; x"), "5");
+    assert_eq!(node::run("let x: num = 5 in x"), "5");
 }
 
 #[test]
 fn test_big() {
-    assert_eq!(node::run("let f: int -> int = fn x: int => x + 1 in f 4"), "5");
+    assert_eq!(node::run("let f: num -> num = fn x: num => x + 1 in f 4"), "5");
 }

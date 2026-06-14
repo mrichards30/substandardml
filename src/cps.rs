@@ -16,7 +16,7 @@ pub fn to_cps(decl: &Decl, k: Value, counter: &mut u64) -> Spanned<CExpr> {
 }
 
 pub fn expr_to_cps(expr: &Spanned<Expr>, k: Value, counter: &mut u64) -> Spanned<CExpr> {
-    let k_span = k.with_span(expr.span);
+    let k_span = k.clone().with_span(expr.span);
     match &expr.inner {
         Expr::Var(p) => CExpr::App(k_span, vec![Value::Var(p.to_string()).with_span(expr.span)]).with_span(expr.span),
         Expr::Num(n) => CExpr::App(k_span, vec![Value::Num(*n).with_span(expr.span)]).with_span(expr.span),
@@ -33,8 +33,8 @@ pub fn expr_to_cps(expr: &Spanned<Expr>, k: Value, counter: &mut u64) -> Spanned
                           vec![Value::Var(v1), Value::Num(1f64)],
                           vec![],
                           vec![
-                              expr_to_cps(&else_, k, counter),
-                              expr_to_cps(&then, k.clone(), counter),
+                              expr_to_cps(&else_, k.clone(), counter),
+                              expr_to_cps(&then, k, counter),
                           ]
                       ).with_span(expr.span)))],
                 Box::new(expr_to_cps(cond, Value::Var(k1), counter))).with_span(expr.span)
@@ -68,6 +68,11 @@ pub fn expr_to_cps(expr: &Spanned<Expr>, k: Value, counter: &mut u64) -> Spanned
                       Box::new(expr_to_cps(rhs, k, counter)))],
                 Box::new(to_cps(lhs, Value::Var(k1), counter))).with_span(expr.span)
         }
+        Expr::Neg(e) =>
+            expr_to_cps(&Expr::BinOp(
+                BinOp::Minus.with_span(expr.span),
+                Box::new(Expr::Num(0.0).with_span(expr.span)),
+                e.clone()).with_span(expr.span), k, counter),
         Expr::BinOp(op, lhs, rhs) => {
             let k1 = fresh(counter);
             let v1 = fresh(counter);
@@ -90,7 +95,7 @@ pub fn expr_to_cps(expr: &Spanned<Expr>, k: Value, counter: &mut u64) -> Spanned
                         vec![Value::Var(v1.clone()), Value::Var(v2.clone())],
                         vec![],
                         vec![
-                            CExpr::App(k_span, vec![Value::Num(0f64).with_span(expr.span)]).with_span(expr.span), // false
+                            CExpr::App(k_span.clone(), vec![Value::Num(0f64).with_span(expr.span)]).with_span(expr.span), // false
                             CExpr::App(k_span, vec![Value::Num(1f64).with_span(expr.span)]).with_span(expr.span), // true
                         ]
                     )
@@ -112,6 +117,6 @@ pub fn expr_to_cps(expr: &Spanned<Expr>, k: Value, counter: &mut u64) -> Spanned
                       Box::new(expr_to_cps(body, Value::Var(k_param), counter)))],
                 Box::new(CExpr::App(k_span, vec![Value::Var(f).with_span(x.span)]).with_span(expr.span)))
                 .with_span(expr.span)
-        }
+        },
     }
 }

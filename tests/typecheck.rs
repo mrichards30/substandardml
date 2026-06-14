@@ -31,6 +31,7 @@ fn test_let_in_types() {
 #[test]
 fn test_monomorphic_fn_types() {
     assert_type_ok("fn x: num => 3", Fn(Box::new(Num), Box::new(Num)));
+    assert_type_ok("fn x: num => x", Fn(Box::new(Num), Box::new(Num)));
     assert_type_err("(fn x: num => 3) true", TypeError::TypeMismatch { found: Bool, expected: Num });
 }
 
