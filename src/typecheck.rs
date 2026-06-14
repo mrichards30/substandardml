@@ -1,5 +1,5 @@
-use chumsky::prelude::Spanned;
 use crate::ast::{BinOp, Decl, Expr, Type, TypeEnv, TypeError};
+use chumsky::prelude::Spanned;
 
 pub fn typecheck(decl: &Decl, env: &TypeEnv) -> Result<Type, TypeError> {
     match decl {
@@ -12,7 +12,7 @@ pub fn typecheck(decl: &Decl, env: &TypeEnv) -> Result<Type, TypeError> {
 pub fn typecheck_expr(expr: &Spanned<Expr>, env: &TypeEnv) -> Result<Type, TypeError> {
     match &expr.inner {
         Expr::Var(name) =>
-            env.get(String::from(name)).cloned()
+            env.get(name.clone()).cloned()
             .ok_or_else(|| TypeError::UnboundVariable(name.to_string())),
         Expr::Num(_) => Ok(Type::Num),
         Expr::Bool(_) => Ok(Type::Bool),
@@ -32,9 +32,13 @@ pub fn typecheck_expr(expr: &Spanned<Expr>, env: &TypeEnv) -> Result<Type, TypeE
         Expr::Fn(v, ty, body) => {
             let ty_inferred = typecheck_expr(&**body, env)?;
             match ty {
-                None => Ok(ty_inferred),
-                Some(ty_provided) if *ty_provided == ty_inferred => Ok(ty_provided.clone()),
-                Some(ty_provided) => Err(TypeError::TypeMismatch { expected: ty_inferred, found: ty_provided.clone() })
+                Some(ty_provided) if *ty_provided == ty_inferred => {
+                    let ty_body = typecheck_expr(body, &env.update(v.to_string(), ty_provided.clone()))?;
+                    Ok(Type::Fn(Box::new(ty_provided.clone()), Box::new(ty_body)))
+                }
+                Some(ty_provided) =>
+                    Err(TypeError::TypeMismatch { expected: ty_provided.clone(), found: ty_inferred }),
+                None => panic!("not yet implemented: please label types in fn!"),
             }
         }
         Expr::App(e1, e2) => {
@@ -67,13 +71,14 @@ pub fn typecheck_expr(expr: &Spanned<Expr>, env: &TypeEnv) -> Result<Type, TypeE
                 (t, _) => Err(TypeError::TypeMismatch { expected: Type::Num, found: t }),
             }
         }
-        Expr::LetIn(_, ty, body, _) => {
+        Expr::LetIn(v, ty, body, in_) => {
             let ty_inferred = typecheck_expr(body, env)?;
-            match ty {
+            let v_ty = match ty {
                 None => Ok(ty_inferred),
                 Some(ty_provided) if *ty_provided == ty_inferred => Ok(ty_provided.clone()),
-                Some(ty_provided) => Err(TypeError::TypeMismatch { expected: ty_inferred, found: ty_provided.clone() })
-            }
+                Some(ty_provided) => Err(TypeError::TypeMismatch { expected: ty_provided.clone(), found: ty_inferred })
+            };
+            typecheck_expr(in_, &env.update(v.to_string(), v_ty?))
         }
     }
 }

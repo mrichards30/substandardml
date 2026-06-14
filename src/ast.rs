@@ -105,7 +105,7 @@ pub enum Expr<'src> {
 
 pub type TypeEnv = HashMap<String, Type>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TypeError {
     UnboundVariable(String),
     TypeMismatch { expected: Type, found: Type },
