@@ -9,3 +9,8 @@ edition = "2021"
 chumsky = { version = "0.13", features = ["pratt"] }
 ariadne = "0.6"
 im = "15"
+wasm-bindgen = "0.2.125"
+console_error_panic_hook = "0.1.7"
+
+[lib]
+crate-type = ["cdylib", "rlib"]

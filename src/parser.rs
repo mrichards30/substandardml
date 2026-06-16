@@ -71,7 +71,7 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
                     just(Token::Ident("unit")).to(Type::Unit),
                     typ.nested_in(select_ref! { Token::Parens(ts) = e => ts.split_spanned(e.span()) }),
             )).pratt(
-                infix(left(1), just(Token::ThinArrow).map_with(|_, e| e.span()), |l, op, r, e|
+                infix(left(1), just(Token::ThinArrow).map_with(|_, e| e.span()), |l, _, r, e|
                     Type::Fn(Box::new(l), Box::new(r)))
             )
         });
@@ -180,6 +180,22 @@ fn parse_failure(err: &Rich<impl fmt::Display>, src: &str) -> ! {
             .map(|(l, s)| (format!("while parsing this {l}"), *s)),
         src,
     )
+}
+
+pub fn safe_prs(src: &str) -> Result<Spanned<Expr<'_>>, &str> {
+    let tokens = lexer()
+        .parse(src)
+        .into_result()
+        .unwrap_or_else(|errs| parse_failure(&errs[0], src));
+
+    let expr = parser()
+        .parse(tokens[..].split_spanned((0..src.len()).into()))
+        .into_result();
+
+    match expr {
+        Ok(e) => Ok(e),
+        Err(e) => parse_failure(&e[0], src)
+    }
 }
 
 pub fn prs(src: &str) -> Spanned<Expr<'_>> {
