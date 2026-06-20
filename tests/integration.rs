@@ -5,6 +5,9 @@ use compiler::node;
  * the js and assert against their outputs.
  */
 
+const TRUE: &str = "1";
+const FALSE: &str = "0";
+
 #[test]
 fn test_addition() {
     assert_eq!(node::run("1 + 2 + 3"), "6");
@@ -21,8 +24,8 @@ fn test_if() {
 #[test]
 fn test_fn() {
     assert_eq!(node::run("(fn x: num => x) 3"), "3");
-    assert_eq!(node::run("(fn x: num => if x >= 0 then true else false) 6"), "1");
-    assert_eq!(node::run("(fn x: num => if x >= 0 then true else false) (-4)"), "0");
+    assert_eq!(node::run("(fn x: num => if x >= 0 then true else false) 6"), TRUE);
+    assert_eq!(node::run("(fn x: num => if x >= 0 then true else false) (-4)"), FALSE);
 }
 
 #[test]

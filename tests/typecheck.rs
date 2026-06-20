@@ -1,8 +1,7 @@
 use compiler::ast::Type::{Bool, Fn, Num, Tyvar};
-use compiler::ast::{Type, TypeError};
-use compiler::typecheck::typecheck_expr;
+use compiler::ast::{Type, TypeEnv, TypeError};
+use compiler::typecheck::{gen_tyvar, typecheck_expr};
 use compiler::parser;
-use im::HashMap;
 
 #[test]
 fn test_atom_types() {
@@ -35,18 +34,20 @@ fn test_monomorphic_fn_types() {
     assert_type_err("(fn x: num => 3) true", TypeError::TypeMismatch { found: Bool, expected: Num });
 }
 
-// #[test]
-// fn test_polymorphic_fn_types() {
-//     assert_type_ok("fn x => 3", Fn(Box::new(Tyvar("a".to_string())), Box::new(Num)));
-//     assert_type_ok("(fn x => 3) Bool", Num);
-//     assert_type_ok("fn x => fn y => 0", Fn(Box::new(Tyvar("a".to_string())), Box::new(Fn(Box::new(Tyvar("b".to_string())), Box::new(Num)))));
-//     assert_type_ok("(fn x => fn y => 0) 5", Fn(Box::new(Tyvar("b".to_string())), Box::new(Num)));
-// }
+#[test]
+fn test_polymorphic_fn_types() {
+    assert_type_ok("fn x: 'a => 3", Fn(Box::new(Tyvar("a".to_string())), Box::new(Num)));
+    assert_type_ok("fn x: 'a -> 'b => 3", Fn(Box::new(Fn(Box::new(Tyvar("a".to_string())), Box::new(Tyvar("b".to_string())))), Box::new(Num)));
+    assert_type_ok("fn x => 3", Fn(Box::new(Tyvar("a".to_string())), Box::new(Num)));
+    // assert_type_ok("(fn x => 3) true", Num);
+    // assert_type_ok("fn x => fn y => 0", Fn(Box::new(Tyvar("a".to_string())), Box::new(Fn(Box::new(Tyvar("b".to_string())), Box::new(Num)))));
+    // assert_type_ok("(fn x => fn y => 0) 5", Fn(Box::new(Tyvar("b".to_string())), Box::new(Num)));
+}
 
 fn assert_type_ok(src: &str, ty: Type) {
-    assert_eq!(typecheck_expr(&parser::prs(src), &HashMap::new()), Ok(ty));
+    assert_eq!(typecheck_expr(&parser::prs(src), &TypeEnv::new()), Ok(ty));
 }
 
 fn assert_type_err(src: &str, err: TypeError) {
-    assert_eq!(typecheck_expr(&parser::prs(src), &HashMap::new()), Err(err))
+    assert_eq!(typecheck_expr(&parser::prs(src), &TypeEnv::new()), Err(err))
 }

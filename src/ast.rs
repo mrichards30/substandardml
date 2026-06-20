@@ -23,6 +23,7 @@ pub enum Token<'src> {
     Slash,
     ThickArrow,
     ThinArrow,
+    SingleQuote,
 
     // Keywords
     Let,
@@ -63,6 +64,7 @@ impl fmt::Display for Token<'_> {
             Token::Else => write!(f, "else"),
             Token::ThickArrow => write!(f, "=>"),
             Token::ThinArrow => write!(f, "->"),
+            Token::SingleQuote => write!(f, "'"),
         }
     }
 }
@@ -104,7 +106,37 @@ pub enum Expr<'src> {
     BinOp(Spanned<BinOp>, Box<Spanned<Self>>, Box<Spanned<Self>>),
 }
 
-pub type TypeEnv = HashMap<String, Type>;
+pub struct TypeEnv {
+    constraints: HashMap<String, Type>,
+    env: HashMap<String, Type>,
+}
+
+impl TypeEnv {
+    pub fn new() -> Self {
+        TypeEnv {
+            constraints: Default::default(),
+            env: Default::default(),
+        }
+    }
+
+    pub fn upd_env(&self, s: String, v: Type) -> Self {
+        TypeEnv {
+            env: self.env.update(s, v),
+            constraints: self.constraints.clone()
+        }
+    }
+
+    pub fn get_env(&self, s: String) -> Option<Type> {
+        self.env.get(&s).cloned()
+    }
+
+    pub fn upd_constraint(&self, s: String, v: Type) -> Self {
+        TypeEnv {
+            env: self.env.clone(),
+            constraints: self.constraints.update(s, v)
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeError {

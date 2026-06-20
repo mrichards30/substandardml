@@ -4,7 +4,7 @@ use std::panic;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(getter_with_clone)]
-struct JsResult {
+pub struct JsResult {
     pub js: String,
     pub errors: Vec<String>
 }
@@ -20,11 +20,11 @@ pub fn compile_to_js(src: String) -> JsResult {
     match decl {
         Ok(e) => {
             match typecheck::typecheck_expr(&e, &TypeEnv::new()) {
-                Ok(typ) => {
+                Ok(_) => {
                     let cps = cps::to_cps(&Decl::Expr(e), Value::Var("console.log".to_string()), &mut 0);
                     JsResult{ js: codegen::gen_program(&cps), errors: vec![] }
                 }
-                Err(err) => {
+                Err(_) => {
                     JsResult{ js: "false".to_string(), errors: vec!["type error".to_string()] }
                 }
             }

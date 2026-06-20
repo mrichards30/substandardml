@@ -27,6 +27,7 @@ fn lexer<'src>()
             // Operators
             just("=>").to(Token::ThickArrow),
             just("->").to(Token::ThinArrow),
+            just("'").to(Token::SingleQuote),
             just("+").to(Token::Plus),
             just("-").to(Token::Minus),
             just("*").to(Token::Asterisk),
@@ -69,9 +70,10 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
             choice((just(Token::Ident("num")).to(Type::Num),
                     just(Token::Ident("bool")).to(Type::Bool),
                     just(Token::Ident("unit")).to(Type::Unit),
+                    just(Token::SingleQuote).ignore_then(ident.clone()).map(|s| Type::Tyvar(s.to_string())),
                     typ.nested_in(select_ref! { Token::Parens(ts) = e => ts.split_spanned(e.span()) }),
             )).pratt(
-                infix(left(1), just(Token::ThinArrow).map_with(|_, e| e.span()), |l, _, r, e|
+                infix(left(1), just(Token::ThinArrow).map_with(|_, e| e.span()), |l, _, r, _|
                     Type::Fn(Box::new(l), Box::new(r)))
             )
         });
