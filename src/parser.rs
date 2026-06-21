@@ -148,7 +148,7 @@ fn failure(
     label: (String, SimpleSpan),
     extra_labels: impl IntoIterator<Item = (String, SimpleSpan)>,
     src: &str,
-) -> ! {
+) {
     let fname = "example";
     Report::build(ReportKind::Error, (fname, label.1.into_range()))
         .with_config(ariadne::Config::new().with_index_type(ariadne::IndexType::Byte))
@@ -166,10 +166,9 @@ fn failure(
         .finish()
         .print(sources([(fname, src)]))
         .unwrap();
-    std::process::exit(1)
 }
 
-fn parse_failure(err: &Rich<impl fmt::Display>, src: &str) -> ! {
+fn parse_failure(err: &Rich<impl fmt::Display>, src: &str) {
     failure(
         err.reason().to_string(),
         (
@@ -184,32 +183,22 @@ fn parse_failure(err: &Rich<impl fmt::Display>, src: &str) -> ! {
     )
 }
 
-pub fn safe_prs(src: &str) -> Result<Spanned<Expr<'_>>, &str> {
-    let tokens = lexer()
-        .parse(src)
-        .into_result()
-        .unwrap_or_else(|errs| parse_failure(&errs[0], src));
+pub fn parse<'src>(src: &'src str) -> Result<Spanned<Expr<'src>>, Vec<Rich<'src, String>>> {
+    let tokens = lexer().parse(src).into_result().map_err(|errs| {
+        parse_failure(&errs[0], src);
+        errs.into_iter()
+            .map(|e| e.map_token(|c| c.to_string()))
+            .collect::<Vec<Rich<'_, String>>>()
+    })?;
 
-    let expr = parser()
-        .parse(tokens[..].split_spanned((0..src.len()).into()))
-        .into_result();
+    let tokens = tokens.split_spanned((0..src.len()).into());
 
-    match expr {
-        Ok(e) => Ok(e),
-        Err(e) => parse_failure(&e[0], src)
-    }
-}
-
-pub fn prs(src: &str) -> Spanned<Expr<'_>> {
-    let tokens = lexer()
-        .parse(src)
-        .into_result()
-        .unwrap_or_else(|errs| parse_failure(&errs[0], src));
-
-    let expr = parser()
-        .parse(tokens[..].split_spanned((0..src.len()).into()))
-        .into_result()
-        .unwrap_or_else(|errs| parse_failure(&errs[0], src));
+    let expr = parser().parse(tokens).into_result().map_err(|errs| {
+        parse_failure(&errs[0], src);
+        errs.into_iter()
+            .map(|e| e.map_token(|tok| tok.to_string()))
+            .collect::<Vec<Rich<'_, String>>>()
+    });
 
     expr
 }
