@@ -18,7 +18,7 @@ pub fn init_compiler() {
 pub fn compile_to_js(src: String) -> JsResult {
     let decl = parser::parse(&src);
     match decl {
-        Ok(e) => match typecheck::typecheck_expr(&e, &TypeEnv::new()) {
+        Ok(e) => match typecheck::typecheck_expr(&e, &mut TypeEnv::new()) {
             Ok(_) => {
                 let cps = cps::to_cps(
                     &Decl::Expr(e),

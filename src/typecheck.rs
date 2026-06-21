@@ -1,26 +1,35 @@
 use crate::ast::Type::Tyvar;
 use crate::ast::{BinOp, Decl, Expr, Type, TypeEnv, TypeError};
-use chumsky::prelude::{Spanned};
+use chumsky::prelude::Spanned;
 use chumsky::span::SpanWrap;
 use im::{HashMap, HashSet};
 
-pub fn typecheck(decl: &Decl, env: &TypeEnv) -> Result<(Type, HashSet<Constraint>), TypeError> {
+pub fn typecheck(decl: &Decl, env: &mut TypeEnv) -> Result<(Type, HashSet<Constraint>), TypeError> {
     match decl {
         Decl::Let(_, _, body) => typecheck_expr(body, env),
-        Decl::LetRec(f, ty, body) => typecheck_expr(body, &env.upd_env(f.to_string(), ty.clone())),
-        Decl::Expr(e) => typecheck_expr(e, env)
+        Decl::LetRec(f, ty, body) => {
+            env.upd_env(f.to_string(), ty.clone());
+            typecheck_expr(body, env)
+        }
+        Decl::Expr(e) => typecheck_expr(e, env),
     }
 }
 
 // TODO better type here; no reflexivity in set<constraint> atm
 type Constraint = (Type, Type);
 
-pub fn typecheck_expr(expr: &Spanned<Expr>, env: &TypeEnv) -> Result<(Type, HashSet<Constraint>), TypeError> {
+pub fn typecheck_expr(
+    expr: &Spanned<Expr>,
+    env: &mut TypeEnv,
+) -> Result<(Type, HashSet<Constraint>), TypeError> {
     match &expr.inner {
-        Expr::Var(name) =>
-            env.get_env(name.to_string())
-                .map(|ty| (ty, HashSet::new()))
-                .ok_or_else(|| TypeError::UnboundVariable(name.to_string())),
+        Expr::Var(name) => {
+            if let Some(ty) = env.get_env(name.to_string()) {
+                Ok((ty, HashSet::new()))
+            } else {
+                Err(TypeError::UnboundVariable(name.to_string()))
+            }
+        }
         Expr::Num(_) => Ok((Type::Num, HashSet::new())),
         Expr::Bool(_) => Ok((Type::Bool, HashSet::new())),
         Expr::Unit => Ok((Type::Unit, HashSet::new())),
@@ -28,14 +37,21 @@ pub fn typecheck_expr(expr: &Spanned<Expr>, env: &TypeEnv) -> Result<(Type, Hash
             let (ty1, c1) = typecheck_expr(t1, env)?;
             let (ty2, c2) = typecheck_expr(t2, env)?;
             let (ty3, c3) = typecheck_expr(t3, env)?;
-            let new_cs = c1.union(c2).union(c3)
-                .update((ty1, Type::Bool)).update((ty2.clone(), ty3));
+            let new_cs = c1
+                .union(c2)
+                .union(c3)
+                .update((ty1, Type::Bool))
+                .update((ty2.clone(), ty3));
             Ok((ty2, new_cs))
         }
         Expr::Fn(v, ty, body) => {
             let ty_provided = ty.clone().unwrap_or(gen_tyvar(body.clone(), env));
-            let (ty_body, cs) = typecheck_expr(&**body, &env.upd_env(v.to_string(), ty_provided.clone()))?;
-            Ok((Type::Fn(Box::new(ty_provided.clone()), Box::new(ty_body)), cs))
+            env.upd_env(v.to_string(), ty_provided.clone());
+            let (ty_body, cs) = typecheck_expr(&**body, env)?;
+            Ok((
+                Type::Fn(Box::new(ty_provided.clone()), Box::new(ty_body)),
+                cs,
+            ))
         }
         Expr::App(t1, t2) => {
             let (ty1, c1) = typecheck_expr(t1, env)?;
@@ -43,7 +59,8 @@ pub fn typecheck_expr(expr: &Spanned<Expr>, env: &TypeEnv) -> Result<(Type, Hash
             // TODO transcribe the lots of side conditions from figure 22-1 from pierce
             // TODO also genvar needs to be over a set of terms and the below line fixed
             let fresh_tyvar = gen_tyvar(t1.clone(), env);
-            let new_cs = c1.union(c2)
+            let new_cs = c1
+                .union(c2)
                 .update((ty1, Type::Fn(Box::new(ty2), Box::new(fresh_tyvar.clone()))));
             Ok((fresh_tyvar, new_cs))
         }
@@ -51,8 +68,7 @@ pub fn typecheck_expr(expr: &Spanned<Expr>, env: &TypeEnv) -> Result<(Type, Hash
             typecheck(lhs, env)?;
             typecheck_expr(rhs, env)
         }
-        Expr::BinOp(op, e1, e2)
-        if is_comparison_op(op) => {
+        Expr::BinOp(op, e1, e2) if is_comparison_op(op) => {
             let (ty1, c1) = typecheck_expr(e1, env)?;
             let (ty2, c2) = typecheck_expr(e2, env)?;
             let new_cs = c1.union(c2).update((ty1, ty2));
@@ -62,7 +78,9 @@ pub fn typecheck_expr(expr: &Spanned<Expr>, env: &TypeEnv) -> Result<(Type, Hash
             // i.e., num ops like plus, minus, etc.
             let (ty1, c1) = typecheck_expr(e1, env)?;
             let (ty2, c2) = typecheck_expr(e2, env)?;
-            let new_cs = c1.union(c2).update((ty1, Type::Num))
+            let new_cs = c1
+                .union(c2)
+                .update((ty1, Type::Num))
                 .update((ty2, Type::Num));
             Ok((Type::Num, new_cs))
         }
@@ -75,56 +93,65 @@ pub fn typecheck_expr(expr: &Spanned<Expr>, env: &TypeEnv) -> Result<(Type, Hash
     }
 }
 
-fn vsubst<'a>(v: &'a Spanned<&'a str>, t1: &'a Box<Spanned<Expr<'a>>>, t2: &'a Box<Spanned<Expr<'a>>>) -> Expr<'a> {
+fn vsubst<'a>(
+    v: &'a Spanned<&'a str>,
+    t1: &'a Box<Spanned<Expr<'a>>>,
+    t2: &'a Box<Spanned<Expr<'a>>>,
+) -> Expr<'a> {
     todo!()
 }
 
 fn is_comparison_op(op: &Spanned<BinOp>) -> bool {
+    use BinOp::*;
     match op.inner {
-        BinOp::Eq => true,
-        BinOp::Neq => true,
-        BinOp::Geq => true,
-        BinOp::Gt => true,
-        BinOp::Leq => true,
-        BinOp::Lt => true,
-        _ => false
+        Eq | Neq | Geq | Gt | Leq | Lt => true,
+        _ => false,
     }
 }
 
-fn tyvars_in_decl(decl: Box<Decl>, env: &TypeEnv, acc: HashSet<String>) -> HashSet<String> {
+fn tyvars_in_decl(decl: Box<Decl>, env: &TypeEnv) -> HashSet<String> {
     match *decl {
         Decl::Let(_, _, _) => HashSet::new(),
         Decl::LetRec(_, _, _) => HashSet::new(),
-        Decl::Expr(e1) => tyvars_in(Box::new(e1), env, acc)
+        Decl::Expr(e1) => tyvars_in(Box::new(e1), env),
     }
 }
 
-fn tyvars_in(expr: Box<Spanned<Expr>>, env: &TypeEnv, acc: HashSet<String>) -> HashSet<String> {
+fn tyvars_in(expr: Box<Spanned<Expr>>, env: &TypeEnv) -> HashSet<String> {
     match expr.inner {
-        Expr::Var(n) =>
-            env.get_env(n.to_string())
-                .map(|v| acc.clone().union(tyvars_in_ty(v)))
-                .unwrap_or(acc),
-        Expr::Num(_) => acc,
-        Expr::Bool(_) => acc,
-        Expr::Unit => acc,
-        Expr::If(t1, t2, t3) =>
-            tyvars_in(t1, env, tyvars_in(t2, env, tyvars_in(t3, env, acc))),
-        Expr::LetIn(_, ty, t1, t2) =>
-            tyvars_in(t1, env, tyvars_in(t2, env, ty
-                .map(|v| acc.clone().union(tyvars_in_ty(v)))
-                .unwrap_or(acc))),
-        Expr::Fn(_, ty, t1) =>
-            tyvars_in(t1, env, ty
-                .map(|v| acc.clone().union(tyvars_in_ty(v)))
-                .unwrap_or(acc)),
-        Expr::App(t1, t2) =>
-            tyvars_in(t1, env, tyvars_in(t2, env, acc)),
-        Expr::Seq(t1, t2) =>
-            tyvars_in_decl(t1, env, tyvars_in(t2, env, acc)),
-        Expr::Neg(t1) => tyvars_in(t1, env, acc),
-        Expr::BinOp(_, t1, t2) =>
-            tyvars_in(t1, env, tyvars_in(t2, env, acc))
+        Expr::Var(n) => {
+            if let Some(v) = env.get_env(n.to_string()) {
+                tyvars_in_ty(v)
+            } else {
+                HashSet::new()
+            }
+        }
+        Expr::Num(_) => HashSet::new(),
+        Expr::Bool(_) => HashSet::new(),
+        Expr::Unit => HashSet::new(),
+        Expr::If(t1, t2, t3) => tyvars_in(t1, env)
+            .union(tyvars_in(t2, env))
+            .union(tyvars_in(t3, env)),
+        Expr::LetIn(_, ty, t1, t2) => {
+            let acc = tyvars_in(t1, env).union(tyvars_in(t2, env));
+            if let Some(v) = ty {
+                acc.union(tyvars_in_ty(v))
+            } else {
+                acc
+            }
+        }
+        Expr::Fn(_, ty, t1) => {
+            let acc = tyvars_in(t1, env);
+            if let Some(v) = ty {
+                acc.union(tyvars_in_ty(v))
+            } else {
+                acc
+            }
+        }
+        Expr::App(t1, t2) => tyvars_in(t1, env).union(tyvars_in(t2, env)),
+        Expr::Seq(t1, t2) => tyvars_in_decl(t1, env).union(tyvars_in(t2, env)),
+        Expr::Neg(t1) => tyvars_in(t1, env),
+        Expr::BinOp(_, t1, t2) => tyvars_in(t1, env).union(tyvars_in(t2, env)),
     }
 }
 
@@ -133,10 +160,9 @@ fn tyvars_in_ty(ty: Type) -> HashSet<String> {
         Type::Num => HashSet::new(),
         Type::Bool => HashSet::new(),
         Type::Unit => HashSet::new(),
-        Type::Fn(t1, t2) =>
-            HashSet::new()
-                .union(tyvars_in_ty(*t1))
-                .union(tyvars_in_ty(*t2)),
+        Type::Fn(t1, t2) => HashSet::new()
+            .union(tyvars_in_ty(*t1))
+            .union(tyvars_in_ty(*t2)),
         Tyvar(s) => HashSet::new().update(s),
     }
 }
@@ -168,7 +194,7 @@ fn idx_to_var_tests() {
 }
 
 pub fn gen_tyvar(expr: Box<Spanned<Expr>>, env: &TypeEnv) -> Type {
-    let tyvars = tyvars_in(expr, env, HashSet::new());
+    let tyvars = tyvars_in(expr, env);
     let mut idx = 0;
     while tyvars.contains(&idx_to_tvar(idx)) {
         idx += 1;
@@ -177,13 +203,15 @@ pub fn gen_tyvar(expr: Box<Spanned<Expr>>, env: &TypeEnv) -> Type {
 }
 
 fn type_subst(ty: Type, substs: HashMap<String, Type>) -> Type {
-    match ty.clone() {
-        Type::Num => ty,
-        Type::Bool => ty,
-        Type::Unit => ty,
-        Type::Fn(ty1, ty2) =>
-        Type::Fn(Box::new(type_subst(*ty1, substs.clone())), Box::new(type_subst(*ty2, substs))),
-        Tyvar(x) => substs.get(&x).unwrap_or(&ty).clone(),
+    match ty {
+        Type::Num => ty.clone(),
+        Type::Bool => ty.clone(),
+        Type::Unit => ty.clone(),
+        Type::Fn(ty1, ty2) => Type::Fn(
+            Box::new(type_subst(*ty1, substs.clone())),
+            Box::new(type_subst(*ty2, substs)),
+        ),
+        Tyvar(ref x) => substs.get(&*x).unwrap_or(&ty).clone(),
     }
 }
 
@@ -191,28 +219,23 @@ fn decls_fvs(decl: &Decl, acc: HashSet<String>) -> HashSet<String> {
     match decl.clone() {
         Decl::Let(_, _, e) => fvs(&e, acc),
         Decl::LetRec(_, _, e) => fvs(&e, acc),
-        Decl::Expr(e) => fvs(&e, acc)
+        Decl::Expr(e) => fvs(&e, acc),
     }
 }
 
 fn fvs(expr: &Spanned<Expr>, acc: HashSet<String>) -> HashSet<String> {
     match expr.clone().inner {
-        Expr::Var(n) => acc.clone().update(n.to_string()),
+        Expr::Var(n) => acc.update(n.to_string()),
         Expr::Num(_) => acc,
         Expr::Bool(_) => acc,
         Expr::Unit => acc,
-        Expr::If(e1, e2, e3) =>
-            fvs(&*e1, fvs(&*e2, fvs(&*e3, acc))),
+        Expr::If(e1, e2, e3) => fvs(&*e1, fvs(&*e2, fvs(&*e3, acc))),
         Expr::LetIn(_, _, _, e1) => fvs(&e1, acc),
         Expr::Fn(_, _, e1) => fvs(&e1, acc),
-        Expr::App(e1, e2) =>
-            fvs(&*e1, fvs(&*e2, acc)),
-        Expr::Seq(e1, e2) =>
-            decls_fvs(&*e1, fvs(&*e2, acc)),
-        Expr::Neg(e1) =>
-            fvs(&*e1, acc),
-        Expr::BinOp(_, e1, e2) =>
-            fvs(&*e1, fvs(&*e2, acc)),
+        Expr::App(e1, e2) => fvs(&*e1, fvs(&*e2, acc)),
+        Expr::Seq(e1, e2) => decls_fvs(&*e1, fvs(&*e2, acc)),
+        Expr::Neg(e1) => fvs(&*e1, acc),
+        Expr::BinOp(_, e1, e2) => fvs(&*e1, fvs(&*e2, acc)),
     }
 }
 

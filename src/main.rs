@@ -12,7 +12,12 @@ fn main() {
     // println!("{:?}", parser::prs("(fn x: num => if x >= 5 then true else false)(6)"));
     // println!("{:?}", parser::prs("(fn x: num => if x >= 5 then true else false)6"));
 
-    println!("{:?}", &parser::parse("let x: num = 5 in x + 1")
-        .map(|e| typecheck_expr(&*Box::new(e), &TypeEnv::new()).unwrap()));
-
+    println!(
+        "{:?}",
+        &parser::parse("let x: num = 5 in x + 1").map(|e| typecheck_expr(
+            &*Box::new(e),
+            &mut TypeEnv::new()
+        )
+        .unwrap())
+    );
 }

@@ -4,7 +4,7 @@ use std::process::Command;
 
 pub fn run(src: &str) -> String {
     let decl = parser::parse(src).unwrap();
-    typecheck::typecheck_expr(&decl, &TypeEnv::new()).unwrap();
+    typecheck::typecheck_expr(&decl, &mut TypeEnv::new()).unwrap();
     let cps = cps::to_cps(
         &Decl::Expr(decl),
         Value::Var("console.log".to_string()),

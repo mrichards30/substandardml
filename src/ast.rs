@@ -1,6 +1,6 @@
-use std::fmt;
 use chumsky::span::Spanned;
 use im::HashMap;
+use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token<'src> {
@@ -33,7 +33,7 @@ pub enum Token<'src> {
     False,
     If,
     Then,
-    Else
+    Else,
 }
 
 impl fmt::Display for Token<'_> {
@@ -75,7 +75,7 @@ pub enum Type {
     Bool,
     Unit,
     Fn(Box<Type>, Box<Type>),
-    Tyvar(String)
+    Tyvar(String),
 }
 
 #[derive(Debug, Clone)]
@@ -87,8 +87,16 @@ pub enum Decl<'src> {
 
 #[derive(Debug, Clone)]
 pub enum BinOp {
-    Plus, Minus, Times, Div, 
-    Eq, Neq, Geq, Gt, Leq, Lt
+    Plus,
+    Minus,
+    Times,
+    Div,
+    Eq,
+    Neq,
+    Geq,
+    Gt,
+    Leq,
+    Lt,
 }
 
 #[derive(Debug, Clone)]
@@ -98,7 +106,12 @@ pub enum Expr<'src> {
     Bool(bool),
     Unit,
     If(Box<Spanned<Self>>, Box<Spanned<Self>>, Box<Spanned<Self>>),
-    LetIn(Spanned<&'src str>, Option<Type>, Box<Spanned<Self>>, Box<Spanned<Self>>),
+    LetIn(
+        Spanned<&'src str>,
+        Option<Type>,
+        Box<Spanned<Self>>,
+        Box<Spanned<Self>>,
+    ),
     Fn(Spanned<&'src str>, Option<Type>, Box<Spanned<Self>>),
     App(Box<Spanned<Self>>, Box<Spanned<Self>>),
     Seq(Box<Decl<'src>>, Box<Spanned<Self>>),
@@ -119,22 +132,16 @@ impl TypeEnv {
         }
     }
 
-    pub fn upd_env(&self, s: String, v: Type) -> Self {
-        TypeEnv {
-            env: self.env.update(s, v),
-            constraints: self.constraints.clone()
-        }
+    pub fn upd_env(&mut self, s: String, v: Type) {
+        self.env.insert(s, v);
     }
 
     pub fn get_env(&self, s: String) -> Option<Type> {
         self.env.get(&s).cloned()
     }
 
-    pub fn upd_constraint(&self, s: String, v: Type) -> Self {
-        TypeEnv {
-            env: self.env.clone(),
-            constraints: self.constraints.update(s, v)
-        }
+    pub fn upd_constraint(&mut self, s: String, v: Type) {
+        self.constraints.insert(s, v);
     }
 }
 
@@ -156,7 +163,10 @@ pub enum Value {
 #[derive(Debug, Clone)]
 pub enum CExpr {
     App(Spanned<Value>, Vec<Spanned<Value>>),
-    Fix(Vec<(String, Vec<String>, Box<Spanned<Self>>)>, Box<Spanned<Self>>),
+    Fix(
+        Vec<(String, Vec<String>, Box<Spanned<Self>>)>,
+        Box<Spanned<Self>>,
+    ),
     PrimOp(Spanned<BinOp>, Vec<Value>, Vec<String>, Vec<Spanned<Self>>),
     Switch(Spanned<Value>, Vec<Spanned<Self>>),
 }
