@@ -69,7 +69,7 @@ impl fmt::Display for Token<'_> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     Num,
     Bool,

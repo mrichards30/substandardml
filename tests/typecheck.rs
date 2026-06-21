@@ -1,6 +1,6 @@
 use compiler::ast::Type::{Bool, Fn, Num, Tyvar};
 use compiler::ast::{Type, TypeEnv, TypeError};
-use compiler::typecheck::{gen_tyvar, typecheck_expr};
+use compiler::typecheck::{typecheck_expr};
 use compiler::parser;
 
 #[test]
@@ -39,15 +39,17 @@ fn test_polymorphic_fn_types() {
     assert_type_ok("fn x: 'a => 3", Fn(Box::new(Tyvar("a".to_string())), Box::new(Num)));
     assert_type_ok("fn x: 'a -> 'b => 3", Fn(Box::new(Fn(Box::new(Tyvar("a".to_string())), Box::new(Tyvar("b".to_string())))), Box::new(Num)));
     assert_type_ok("fn x => 3", Fn(Box::new(Tyvar("a".to_string())), Box::new(Num)));
-    // assert_type_ok("(fn x => 3) true", Num);
+    assert_type_ok("(fn x => 3) true", Num);
     // assert_type_ok("fn x => fn y => 0", Fn(Box::new(Tyvar("a".to_string())), Box::new(Fn(Box::new(Tyvar("b".to_string())), Box::new(Num)))));
     // assert_type_ok("(fn x => fn y => 0) 5", Fn(Box::new(Tyvar("b".to_string())), Box::new(Num)));
 }
 
 fn assert_type_ok(src: &str, ty: Type) {
-    assert_eq!(typecheck_expr(&parser::prs(src), &TypeEnv::new()), Ok(ty));
+    let res = &parser::parse(src).unwrap();
+    assert_eq!(typecheck_expr(res, &TypeEnv::new()).map(|(a,b)| a), Ok(ty));
 }
 
 fn assert_type_err(src: &str, err: TypeError) {
-    assert_eq!(typecheck_expr(&parser::prs(src), &TypeEnv::new()), Err(err))
+    let res = &parser::parse(src).unwrap();
+    assert_eq!(typecheck_expr(res, &TypeEnv::new()), Err(err))
 }

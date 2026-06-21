@@ -183,7 +183,7 @@ fn parse_failure(err: &Rich<impl fmt::Display>, src: &str) {
     )
 }
 
-pub fn parse<'src>(src: &'src str) -> Result<Spanned<Expr<'src>>, Vec<Rich<'src, String>>> {
+pub fn parse(src: &str) -> Result<Spanned<Expr<'_>>, Vec<Rich<'_, String>>> {
     let tokens = lexer().parse(src).into_result().map_err(|errs| {
         parse_failure(&errs[0], src);
         errs.into_iter()
@@ -196,7 +196,7 @@ pub fn parse<'src>(src: &'src str) -> Result<Spanned<Expr<'src>>, Vec<Rich<'src,
     let expr = parser().parse(tokens).into_result().map_err(|errs| {
         parse_failure(&errs[0], src);
         errs.into_iter()
-            .map(|e| e.map_token(|tok| tok.to_string()))
+            .map(|e| e.map_token(|tok| tok.to_string()).into_owned())
             .collect::<Vec<Rich<'_, String>>>()
     });
 
