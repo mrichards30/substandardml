@@ -119,6 +119,7 @@ pub enum Expr<'src> {
     BinOp(Spanned<BinOp>, Box<Spanned<Self>>, Box<Spanned<Self>>),
 }
 
+#[derive(Debug, Clone)]
 pub struct TypeEnv {
     constraints: HashMap<String, Type>,
     env: HashMap<String, Type>,

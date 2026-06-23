@@ -1,8 +1,16 @@
+use std::ops::Add;
+use std::sync::LazyLock;
+
 use crate::ast::Type::Tyvar;
 use crate::ast::{BinOp, Decl, Expr, Type, TypeEnv, TypeError};
 use chumsky::prelude::Spanned;
 use chumsky::span::SpanWrap;
 use im::{HashMap, HashSet};
+
+static TYPE_VARIABLE: LazyLock<i32> = LazyLock::new(|| 0);
+
+// TODO better type here; no symmetry in set<constraint> atm
+type Constraint = (Type, Type);
 
 pub fn typecheck(decl: &Decl, env: &mut TypeEnv) -> Result<(Type, HashSet<Constraint>), TypeError> {
     match decl {
@@ -14,9 +22,6 @@ pub fn typecheck(decl: &Decl, env: &mut TypeEnv) -> Result<(Type, HashSet<Constr
         Decl::Expr(e) => typecheck_expr(e, env),
     }
 }
-
-// TODO better type here; no reflexivity in set<constraint> atm
-type Constraint = (Type, Type);
 
 pub fn typecheck_expr(
     expr: &Spanned<Expr>,
@@ -45,21 +50,19 @@ pub fn typecheck_expr(
             Ok((ty2, new_cs))
         }
         Expr::Fn(v, ty, body) => {
-            let ty_provided = ty.clone().unwrap_or(gen_tyvar(body.clone(), env));
+            let ty_provided = ty.clone().unwrap_or(gen_tyvar());
             env.upd_env(v.to_string(), ty_provided.clone());
             let (ty_body, cs) = typecheck_expr(&**body, env)?;
-            Ok((
-                Type::Fn(Box::new(ty_provided.clone()), Box::new(ty_body)),
-                cs,
-            ))
+            Ok((Type::Fn(Box::new(ty_provided), Box::new(ty_body)), cs))
         }
         Expr::App(t1, t2) => {
             // FIXME these should not be mutating env
-            let (ty1, c1) = typecheck_expr(t1, env)?;
-            let (ty2, c2) = typecheck_expr(t2, env)?;
+            let mut t1_env = env.clone();
+            let (ty1, c1) = typecheck_expr(t1, &mut t1_env)?;
+            let (ty2, c2) = typecheck_expr(t2, &mut env.clone())?;
             // TODO transcribe the lots of side conditions from figure 22-1 from pierce
             // TODO also genvar needs to be over a set of terms and the below line fixed
-            let fresh_tyvar = gen_tyvar(t1.clone(), env);
+            let fresh_tyvar = gen_tyvar();
             let new_cs = c1
                 .union(c2)
                 .update((ty1, Type::Fn(Box::new(ty2), Box::new(fresh_tyvar.clone()))));
@@ -93,6 +96,7 @@ pub fn typecheck_expr(
             Ok((ty2, c))
         }
     }?;
+    dbg!(constraints.clone());
     match unify(constraints.clone()) {
         None => todo!(),
         Some(unification) => Ok((ty, constraints)),
@@ -167,7 +171,7 @@ fn tyvars_in(expr: Box<Spanned<Expr>>, env: &TypeEnv) -> HashSet<String> {
     match expr.inner {
         Expr::Var(n) => {
             if let Some(v) = env.get_env(n.to_string()) {
-                tyvars_in_ty(v)
+                tyvars_in_ty(&v)
             } else {
                 HashSet::new()
             }
@@ -181,7 +185,7 @@ fn tyvars_in(expr: Box<Spanned<Expr>>, env: &TypeEnv) -> HashSet<String> {
         Expr::LetIn(_, ty, t1, t2) => {
             let acc = tyvars_in(t1, env).union(tyvars_in(t2, env));
             if let Some(v) = ty {
-                acc.union(tyvars_in_ty(v))
+                acc.union(tyvars_in_ty(&v))
             } else {
                 acc
             }
@@ -189,7 +193,7 @@ fn tyvars_in(expr: Box<Spanned<Expr>>, env: &TypeEnv) -> HashSet<String> {
         Expr::Fn(_, ty, t1) => {
             let acc = tyvars_in(t1, env);
             if let Some(v) = ty {
-                acc.union(tyvars_in_ty(v))
+                acc.union(tyvars_in_ty(&v))
             } else {
                 acc
             }
@@ -201,15 +205,16 @@ fn tyvars_in(expr: Box<Spanned<Expr>>, env: &TypeEnv) -> HashSet<String> {
     }
 }
 
-fn tyvars_in_ty(ty: Type) -> HashSet<String> {
+fn tyvars_in_ty(ty: &Type) -> HashSet<String> {
+    use Type::*;
     match ty {
-        Type::Num => HashSet::new(),
-        Type::Bool => HashSet::new(),
-        Type::Unit => HashSet::new(),
-        Type::Fn(t1, t2) => HashSet::new()
-            .union(tyvars_in_ty(*t1))
-            .union(tyvars_in_ty(*t2)),
-        Tyvar(s) => HashSet::new().update(s),
+        Num => HashSet::new(),
+        Bool => HashSet::new(),
+        Unit => HashSet::new(),
+        Fn(t1, t2) => HashSet::new()
+            .union(tyvars_in_ty(&**t1))
+            .union(tyvars_in_ty(&**t2)),
+        Tyvar(s) => HashSet::new().update(s.clone()),
     }
 }
 
@@ -239,12 +244,8 @@ fn idx_to_var_tests() {
     assert_eq!(idx_to_tvar(200), "gr");
 }
 
-pub fn gen_tyvar(expr: Box<Spanned<Expr>>, env: &TypeEnv) -> Type {
-    let tyvars = tyvars_in(expr, env);
-    let mut idx = 0;
-    while tyvars.contains(&idx_to_tvar(idx)) {
-        idx += 1;
-    }
+pub fn gen_tyvar() -> Type {
+    let idx = TYPE_VARIABLE.add(1);
     Tyvar(idx_to_tvar(idx))
 }
 
@@ -285,21 +286,89 @@ fn fvs(expr: &Spanned<Expr>, acc: HashSet<String>) -> HashSet<String> {
     }
 }
 
-// TODO tests
-#[test]
-fn test_fvs() {
-    // todo!()
+fn unify(c: HashSet<Constraint>) -> Option<Vec<(Type, Type)>> {
+    use Type::*;
+    if c.is_empty() {
+        return Some(Vec::new());
+    }
+    let mut c = c.into_iter();
+    let (s, t) = c.next().unwrap();
+    let rest: HashSet<Constraint> = c.collect();
+
+    if s == t {
+        unify(rest)
+    } else if let Tyvar(x) = s.clone()
+        && !tyvars_in_ty(&t).contains(&x)
+    {
+        // S = X and X not in FVs(T)
+        unify(
+            rest.iter()
+                .map(|(ty1, ty2)| {
+                    let ty1_prime = match ty1 {
+                        Tyvar(v) if *v == x => t.clone(),
+                        _ => ty1.clone(),
+                    };
+                    let ty2_prime = match ty2 {
+                        Tyvar(v) if *v == x => t.clone(),
+                        _ => ty2.clone(),
+                    };
+                    (ty1_prime, ty2_prime)
+                })
+                .collect(),
+        )
+        .map(|mut subst| {
+            subst.push((s.clone(), t.clone()));
+            subst
+        })
+    } else if let Tyvar(x) = t.clone()
+        && !tyvars_in_ty(&s).contains(&x)
+    {
+        // T = X and X not in FVs(S)
+        unify(
+            rest.iter()
+                .map(|(ty1, ty2)| {
+                    let ty1_prime = match ty1 {
+                        Tyvar(v) if *v == x => s.clone(),
+                        _ => ty1.clone(),
+                    };
+                    let ty2_prime = match ty2 {
+                        Tyvar(v) if *v == x => s.clone(),
+                        _ => ty2.clone(),
+                    };
+                    (ty1_prime, ty2_prime)
+                })
+                .collect(),
+        )
+        .map(|mut subst| {
+            subst.push((s.clone(), t.clone()));
+            subst
+        })
+    } else {
+        match (s, t) {
+            (Fn(s1, s2), Fn(t1, t2)) => unify(rest.update((*s1, *t1)).update((*s2, *t2))),
+            _ => None,
+        }
+    }
 }
 
-fn unify(c: HashSet<Constraint>) -> Option<Vec<(Type, Type)>> {
-    let mut c = c.into_iter();
-    if let Some((s, t)) = c.next() {
-        if s == t {
-            return unify(c.collect());
-        } else {
-            todo!()
-        }
-    } else {
-        return Some(vec![]);
+mod test {
+    use im::HashSet;
+
+    use crate::typecheck::unify;
+
+    #[test]
+    fn test_unify_concrete() {
+        use super::Type::{self, *};
+        let constraints = HashSet::new().update((Num, Num));
+        let unification = unify(constraints).unwrap();
+        assert!(unification.is_empty());
+    }
+
+    #[test]
+    fn test_unify_concrete_fail() {
+        use super::Type::{self, *};
+        let constraints = HashSet::new().update((Num, Bool));
+        let unification = unify(constraints);
+        assert!(unification.is_none())
     }
 }
