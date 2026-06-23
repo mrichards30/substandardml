@@ -76,19 +76,35 @@ fn test_polymorphic_fn_types() {
         Fn(Box::new(Tyvar("a".to_string())), Box::new(Num)),
     );
     assert_type_ok("(fn x => 3) true", Num);
-    // assert_type_ok("fn x => fn y => 0", Fn(Box::new(Tyvar("a".to_string())), Box::new(Fn(Box::new(Tyvar("b".to_string())), Box::new(Num)))));
-    // assert_type_ok("(fn x => fn y => 0) 5", Fn(Box::new(Tyvar("b".to_string())), Box::new(Num)));
+    assert_type_ok(
+        "fn x => fn y => 0",
+        Fn(
+            Box::new(Tyvar("a".to_string())),
+            Box::new(Fn(Box::new(Tyvar("b".to_string())), Box::new(Num))),
+        ),
+    );
+    assert_type_ok(
+        "(fn x => fn y => 0) 5",
+        Fn(Box::new(Tyvar("b".to_string())), Box::new(Num)),
+    );
 }
 
 fn assert_type_ok(src: &str, ty: Type) {
     let res = &parser::parse(src).unwrap();
     assert_eq!(
         typecheck_expr(res, &mut TypeEnv::new()).map(|(a, b)| a),
-        Ok(ty)
+        Ok(ty),
+        "{}",
+        src
     );
 }
 
 fn assert_type_err(src: &str, err: TypeError) {
     let res = &parser::parse(src).unwrap();
-    assert_eq!(typecheck_expr(res, &mut TypeEnv::new()), Err(err))
+    assert_eq!(
+        typecheck_expr(res, &mut TypeEnv::new()),
+        Err(err),
+        "{}",
+        src
+    )
 }

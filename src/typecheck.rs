@@ -22,7 +22,7 @@ pub fn typecheck_expr(
     expr: &Spanned<Expr>,
     env: &mut TypeEnv,
 ) -> Result<(Type, HashSet<Constraint>), TypeError> {
-    match &expr.inner {
+    let (ty, constraints) = match &expr.inner {
         Expr::Var(name) => {
             if let Some(ty) = env.get_env(name.to_string()) {
                 Ok((ty, HashSet::new()))
@@ -54,6 +54,7 @@ pub fn typecheck_expr(
             ))
         }
         Expr::App(t1, t2) => {
+            // FIXME these should not be mutating env
             let (ty1, c1) = typecheck_expr(t1, env)?;
             let (ty2, c2) = typecheck_expr(t2, env)?;
             // TODO transcribe the lots of side conditions from figure 22-1 from pierce
@@ -65,6 +66,7 @@ pub fn typecheck_expr(
             Ok((fresh_tyvar, new_cs))
         }
         Expr::Seq(lhs, rhs) => {
+            // FIXME these should not be mutating env
             typecheck(lhs, env)?;
             typecheck_expr(rhs, env)
         }
@@ -90,6 +92,10 @@ pub fn typecheck_expr(
             let (ty2, c) = typecheck_expr(&vsubst(v, t1, t2).with_span(expr.span), env)?;
             Ok((ty2, c))
         }
+    }?;
+    match unify(constraints.clone()) {
+        None => todo!(),
+        Some(unification) => Ok((ty, constraints)),
     }
 }
 
@@ -98,6 +104,46 @@ fn vsubst<'a>(
     t1: &'a Box<Spanned<Expr<'a>>>,
     t2: &'a Box<Spanned<Expr<'a>>>,
 ) -> Expr<'a> {
+    use Expr::*;
+    match &t2.inner {
+        Var(v2) => {
+            if v.inner == *v2 {
+                t1.inner.clone()
+            } else {
+                Var(v2)
+            }
+        }
+        Num(_) | Bool(_) | Unit => t2.inner.clone(),
+        If(cond_, then_, else_) => If(
+            Box::new(vsubst(v, t1, cond_).with_span(cond_.span)),
+            Box::new(vsubst(v, t1, then_).with_span(then_.span)),
+            Box::new(vsubst(v, t1, else_).with_span(else_.span)),
+        ),
+        LetIn(spanned, _, spanned1, spanned2) => todo!(),
+        Fn(spanned, _, spanned1) => todo!(),
+        App(a, b) => App(
+            Box::new(vsubst(v, t1, a).with_span(a.span)),
+            Box::new(vsubst(v, t1, b).with_span(b.span)),
+        ),
+        Seq(a, b) => Seq(
+            Box::new(vsubst_decl(v, t1, a)),
+            Box::new(vsubst(v, t1, b).with_span(b.span)),
+        ),
+        Neg(expr) => Neg(Box::new(vsubst(v, t1, expr).with_span(expr.span))),
+        BinOp(op, lhs, rhs) => BinOp(
+            op.clone(),
+            Box::new(vsubst(v, t1, lhs).with_span(lhs.span)),
+            Box::new(vsubst(v, t1, rhs).with_span(rhs.span)),
+        ),
+    }
+    // todo!()
+}
+
+fn vsubst_decl<'a>(
+    v: &'a Spanned<&'a str>,
+    t1: &'a Box<Spanned<Expr<'a>>>,
+    t2: &'a Box<Decl<'a>>,
+) -> Decl<'a> {
     todo!()
 }
 
@@ -217,38 +263,43 @@ fn type_subst(ty: Type, substs: HashMap<String, Type>) -> Type {
 
 fn decls_fvs(decl: &Decl, acc: HashSet<String>) -> HashSet<String> {
     match decl.clone() {
-        Decl::Let(_, _, e) => fvs(&e, acc),
-        Decl::LetRec(_, _, e) => fvs(&e, acc),
+        Decl::Let(v, _, e) => fvs(&e, acc).without(&v),
+        Decl::LetRec(v, _, e) => fvs(&e, acc).without(&v),
         Decl::Expr(e) => fvs(&e, acc),
     }
 }
 
 fn fvs(expr: &Spanned<Expr>, acc: HashSet<String>) -> HashSet<String> {
-    match expr.clone().inner {
+    match expr.inner {
         Expr::Var(n) => acc.update(n.to_string()),
         Expr::Num(_) => acc,
         Expr::Bool(_) => acc,
         Expr::Unit => acc,
-        Expr::If(e1, e2, e3) => fvs(&*e1, fvs(&*e2, fvs(&*e3, acc))),
-        Expr::LetIn(_, _, _, e1) => fvs(&e1, acc),
-        Expr::Fn(_, _, e1) => fvs(&e1, acc),
-        Expr::App(e1, e2) => fvs(&*e1, fvs(&*e2, acc)),
-        Expr::Seq(e1, e2) => decls_fvs(&*e1, fvs(&*e2, acc)),
-        Expr::Neg(e1) => fvs(&*e1, acc),
-        Expr::BinOp(_, e1, e2) => fvs(&*e1, fvs(&*e2, acc)),
+        Expr::If(ref e1, ref e2, ref e3) => fvs(&*e1, fvs(&*e2, fvs(&*e3, acc))),
+        Expr::LetIn(v, _, ref e1, ref e2) => fvs(&e1, fvs(&e2, acc)).without(v.inner),
+        Expr::Fn(v, _, ref e1) => fvs(&e1, acc).without(v.inner),
+        Expr::App(ref e1, ref e2) => fvs(&*e1, fvs(&*e2, acc)),
+        Expr::Seq(ref e1, ref e2) => decls_fvs(&*e1, fvs(&*e2, acc)),
+        Expr::Neg(ref e1) => fvs(&*e1, acc),
+        Expr::BinOp(_, ref e1, ref e2) => fvs(&*e1, fvs(&*e2, acc)),
     }
 }
 
+// TODO tests
+#[test]
+fn test_fvs() {
+    // todo!()
+}
+
 fn unify(c: HashSet<Constraint>) -> Option<Vec<(Type, Type)>> {
-    // if c.is_empty() {
-    //     return Some(vec![]);
-    // }
-    // let (s, t) = &c[0];
-    // let tail = &c[1..c.len() - 1].to_owned();
-    // if s == t {
-    //     return unify(*tail);
-    // } else if false {
-    //
-    // }
-    None
+    let mut c = c.into_iter();
+    if let Some((s, t)) = c.next() {
+        if s == t {
+            return unify(c.collect());
+        } else {
+            todo!()
+        }
+    } else {
+        return Some(vec![]);
+    }
 }

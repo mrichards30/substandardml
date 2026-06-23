@@ -1,15 +1,15 @@
 use crate::ast::{BinOp, Expr, Token, Type};
 use ariadne::{sources, Color, Label, Report, ReportKind};
 use chumsky::input::MappedInput;
+use chumsky::pratt::{infix, left, prefix};
 use chumsky::prelude::*;
 use chumsky::span::Spanned;
 use std::fmt;
-use chumsky::pratt::{infix, left, prefix};
 
 // adapted from https://codeberg.org/zesterer/chumsky/src/branch/main/examples/mini_ml.rs
 
-fn lexer<'src>()
-    -> impl Parser<'src, &'src str, Vec<Spanned<Token<'src>>>, extra::Err<Rich<'src, char>>> {
+fn lexer<'src>(
+) -> impl Parser<'src, &'src str, Vec<Spanned<Token<'src>>>, extra::Err<Rich<'src, char>>> {
     recursive(|token| {
         choice((
             // Keywords
@@ -52,10 +52,12 @@ fn lexer<'src>()
                 .labelled("token tree")
                 .as_context()
                 .map(Token::Parens),
-        )).spanned().padded()
+        ))
+        .spanned()
+        .padded()
     })
-        .repeated()
-        .collect()
+    .repeated()
+    .collect()
 }
 
 fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
@@ -67,15 +69,20 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
     recursive(|expr| {
         let ident = select_ref! { Token::Ident(x) => *x };
         let parse_type = recursive(|typ| {
-            choice((just(Token::Ident("num")).to(Type::Num),
-                    just(Token::Ident("bool")).to(Type::Bool),
-                    just(Token::Ident("unit")).to(Type::Unit),
-                    just(Token::SingleQuote).ignore_then(ident.clone()).map(|s| Type::Tyvar(s.to_string())),
-                    typ.nested_in(select_ref! { Token::Parens(ts) = e => ts.split_spanned(e.span()) }),
-            )).pratt(
-                infix(left(1), just(Token::ThinArrow).map_with(|_, e| e.span()), |l, _, r, _|
-                    Type::Fn(Box::new(l), Box::new(r)))
-            )
+            choice((
+                just(Token::Ident("num")).to(Type::Num),
+                just(Token::Ident("bool")).to(Type::Bool),
+                just(Token::Ident("unit")).to(Type::Unit),
+                just(Token::SingleQuote)
+                    .ignore_then(ident.clone())
+                    .map(|s| Type::Tyvar(s.to_string())),
+                typ.nested_in(select_ref! { Token::Parens(ts) = e => ts.split_spanned(e.span()) }),
+            ))
+            .pratt(infix(
+                left(1),
+                just(Token::ThinArrow).map_with(|_, e| e.span()),
+                |l, _, r, _| Type::Fn(Box::new(l), Box::new(r)),
+            ))
         });
         let atom = choice((
             select_ref! { Token::Num(x) => Expr::Num(*x) }.spanned(),
@@ -90,8 +97,9 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
                 .then(expr.clone())
                 .then_ignore(just(Token::In))
                 .then(expr.clone())
-                .map(|(((lhs, typ), rhs), then)|
-                    Expr::LetIn(lhs, typ, Box::new(rhs), Box::new(then)))
+                .map(|(((lhs, typ), rhs), then)| {
+                    Expr::LetIn(lhs, typ, Box::new(rhs), Box::new(then))
+                })
                 .spanned(),
             // fn x: typ => y
             just(Token::Fn)
@@ -99,8 +107,7 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
                 .then(just(Token::Colon).ignore_then(parse_type.clone()).or_not())
                 .then_ignore(just(Token::ThickArrow))
                 .then(expr.clone())
-                .map(|((lhs, typ), rhs)|
-                    Expr::Fn(lhs, typ, Box::new(rhs)))
+                .map(|((lhs, typ), rhs)| Expr::Fn(lhs, typ, Box::new(rhs)))
                 .spanned(),
             // if x then y else z
             just(Token::If)
@@ -109,36 +116,99 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
                 .then(expr.clone())
                 .then_ignore(just(Token::Else))
                 .then(expr.clone())
-                .map(|((cond, then_), else_)|
-                    Expr::If(Box::new(cond), Box::new(then_), Box::new(else_)))
+                .map(|((cond, then_), else_)| {
+                    Expr::If(Box::new(cond), Box::new(then_), Box::new(else_))
+                })
                 .spanned(),
             expr.nested_in(select_ref! { Token::Parens(ts) = e => ts.split_spanned(e.span()) }),
         ));
         atom.pratt((
-            infix(left(1), just(Token::Plus).map_with(|_, e| e.span()), |l, op, r, e|
-                Expr::BinOp(BinOp::Plus.with_span(op), Box::new(l), Box::new(r)).with_span(e.span())),
-            infix(left(1), just(Token::Minus).map_with(|_, e| e.span()), |l, op, r, e|
-                Expr::BinOp(BinOp::Minus.with_span(op), Box::new(l), Box::new(r)).with_span(e.span())),
-            infix(left(1), just(Token::Asterisk).map_with(|_, e| e.span()), |l, op, r, e|
-                Expr::BinOp(BinOp::Times.with_span(op), Box::new(l), Box::new(r)).with_span(e.span())),
-            infix(left(1), just(Token::Slash).map_with(|_, e| e.span()), |l, op, r, e|
-                Expr::BinOp(BinOp::Div.with_span(op), Box::new(l), Box::new(r)).with_span(e.span())),
-            infix(left(1), just(Token::Geq).map_with(|_, e| e.span()), |l, op, r, e|
-                Expr::BinOp(BinOp::Geq.with_span(op), Box::new(l), Box::new(r)).with_span(e.span())),
-            infix(left(1), just(Token::Gt).map_with(|_, e| e.span()), |l, op, r, e|
-                Expr::BinOp(BinOp::Gt.with_span(op), Box::new(l), Box::new(r)).with_span(e.span())),
-            infix(left(1), just(Token::Leq).map_with(|_, e| e.span()), |l, op, r, e|
-                Expr::BinOp(BinOp::Leq.with_span(op), Box::new(l), Box::new(r)).with_span(e.span())),
-            infix(left(1), just(Token::Lt).map_with(|_, e| e.span()), |l, op, r, e|
-                Expr::BinOp(BinOp::Lt.with_span(op), Box::new(l), Box::new(r)).with_span(e.span())),
-            infix(left(1), just(Token::Eq).map_with(|_, e| e.span()), |l, op, r, e|
-                Expr::BinOp(BinOp::Eq.with_span(op), Box::new(l), Box::new(r)).with_span(e.span())),
-            infix(left(1), just(Token::Neq).map_with(|_, e| e.span()), |l, op, r, e|
-                Expr::BinOp(BinOp::Neq.with_span(op), Box::new(l), Box::new(r)).with_span(e.span())),
-            infix(left(1), empty(), |l, _, r, e|
-                Expr::App(Box::new(l), Box::new(r)).with_span(e.span())),
-            prefix(1, just(Token::Minus), |_, body, e|
-                Expr::Neg(Box::new(body)).with_span(e.span())),
+            infix(
+                left(1),
+                just(Token::Plus).map_with(|_, e| e.span()),
+                |l, op, r, e| {
+                    Expr::BinOp(BinOp::Plus.with_span(op), Box::new(l), Box::new(r))
+                        .with_span(e.span())
+                },
+            ),
+            infix(
+                left(1),
+                just(Token::Minus).map_with(|_, e| e.span()),
+                |l, op, r, e| {
+                    Expr::BinOp(BinOp::Minus.with_span(op), Box::new(l), Box::new(r))
+                        .with_span(e.span())
+                },
+            ),
+            infix(
+                left(1),
+                just(Token::Asterisk).map_with(|_, e| e.span()),
+                |l, op, r, e| {
+                    Expr::BinOp(BinOp::Times.with_span(op), Box::new(l), Box::new(r))
+                        .with_span(e.span())
+                },
+            ),
+            infix(
+                left(1),
+                just(Token::Slash).map_with(|_, e| e.span()),
+                |l, op, r, e| {
+                    Expr::BinOp(BinOp::Div.with_span(op), Box::new(l), Box::new(r))
+                        .with_span(e.span())
+                },
+            ),
+            infix(
+                left(1),
+                just(Token::Geq).map_with(|_, e| e.span()),
+                |l, op, r, e| {
+                    Expr::BinOp(BinOp::Geq.with_span(op), Box::new(l), Box::new(r))
+                        .with_span(e.span())
+                },
+            ),
+            infix(
+                left(1),
+                just(Token::Gt).map_with(|_, e| e.span()),
+                |l, op, r, e| {
+                    Expr::BinOp(BinOp::Gt.with_span(op), Box::new(l), Box::new(r))
+                        .with_span(e.span())
+                },
+            ),
+            infix(
+                left(1),
+                just(Token::Leq).map_with(|_, e| e.span()),
+                |l, op, r, e| {
+                    Expr::BinOp(BinOp::Leq.with_span(op), Box::new(l), Box::new(r))
+                        .with_span(e.span())
+                },
+            ),
+            infix(
+                left(1),
+                just(Token::Lt).map_with(|_, e| e.span()),
+                |l, op, r, e| {
+                    Expr::BinOp(BinOp::Lt.with_span(op), Box::new(l), Box::new(r))
+                        .with_span(e.span())
+                },
+            ),
+            infix(
+                left(1),
+                just(Token::Eq).map_with(|_, e| e.span()),
+                |l, op, r, e| {
+                    Expr::BinOp(BinOp::Eq.with_span(op), Box::new(l), Box::new(r))
+                        .with_span(e.span())
+                },
+            ),
+            infix(
+                left(1),
+                just(Token::Neq).map_with(|_, e| e.span()),
+                |l, op, r, e| {
+                    Expr::BinOp(BinOp::Neq.with_span(op), Box::new(l), Box::new(r))
+                        .with_span(e.span())
+                },
+            ),
+            infix(left(1), empty(), |l, _, r, e| {
+                Expr::App(Box::new(l), Box::new(r)).with_span(e.span())
+            }),
+            prefix(1, just(Token::Minus), |_, body, e| {
+                Expr::Neg(Box::new(body)).with_span(e.span())
+            }),
         ))
     })
 }
