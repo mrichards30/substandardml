@@ -7,7 +7,7 @@ use chumsky::prelude::Spanned;
 use chumsky::span::SpanWrap;
 use im::{HashMap, HashSet};
 
-static TYPE_VARIABLE: LazyLock<i32> = LazyLock::new(|| 0);
+static TYPE_VARIABLE: LazyLock<i32> = LazyLock::new(|| 1);
 
 // TODO better type here; no symmetry in set<constraint> atm
 type Constraint = (Type, Type);
@@ -59,7 +59,7 @@ pub fn typecheck_expr(
             // FIXME these should not be mutating env
             let mut t1_env = env.clone();
             let (ty1, c1) = typecheck_expr(t1, &mut t1_env)?;
-            let (ty2, c2) = typecheck_expr(t2, &mut env.clone())?;
+            let (ty2, c2) = typecheck_expr(t2, env)?;
             // TODO transcribe the lots of side conditions from figure 22-1 from pierce
             // TODO also genvar needs to be over a set of terms and the below line fixed
             let fresh_tyvar = gen_tyvar();
@@ -98,8 +98,8 @@ pub fn typecheck_expr(
     }?;
     dbg!(constraints.clone());
     match unify(constraints.clone()) {
-        None => todo!(),
-        Some(unification) => Ok((ty, constraints)),
+        Err((expected, found)) => Err(TypeError::TypeMismatch { expected, found }),
+        Ok(unification) => Ok((ty, constraints)),
     }
 }
 
@@ -168,21 +168,20 @@ fn tyvars_in_decl(decl: Box<Decl>, env: &TypeEnv) -> HashSet<String> {
 }
 
 fn tyvars_in(expr: Box<Spanned<Expr>>, env: &TypeEnv) -> HashSet<String> {
+    use Expr::*;
     match expr.inner {
-        Expr::Var(n) => {
+        Var(n) => {
             if let Some(v) = env.get_env(n.to_string()) {
                 tyvars_in_ty(&v)
             } else {
                 HashSet::new()
             }
         }
-        Expr::Num(_) => HashSet::new(),
-        Expr::Bool(_) => HashSet::new(),
-        Expr::Unit => HashSet::new(),
-        Expr::If(t1, t2, t3) => tyvars_in(t1, env)
+        Num(_) | Bool(_) | Unit => HashSet::new(),
+        If(t1, t2, t3) => tyvars_in(t1, env)
             .union(tyvars_in(t2, env))
             .union(tyvars_in(t3, env)),
-        Expr::LetIn(_, ty, t1, t2) => {
+        LetIn(_, ty, t1, t2) => {
             let acc = tyvars_in(t1, env).union(tyvars_in(t2, env));
             if let Some(v) = ty {
                 acc.union(tyvars_in_ty(&v))
@@ -190,7 +189,7 @@ fn tyvars_in(expr: Box<Spanned<Expr>>, env: &TypeEnv) -> HashSet<String> {
                 acc
             }
         }
-        Expr::Fn(_, ty, t1) => {
+        Fn(_, ty, t1) => {
             let acc = tyvars_in(t1, env);
             if let Some(v) = ty {
                 acc.union(tyvars_in_ty(&v))
@@ -198,10 +197,10 @@ fn tyvars_in(expr: Box<Spanned<Expr>>, env: &TypeEnv) -> HashSet<String> {
                 acc
             }
         }
-        Expr::App(t1, t2) => tyvars_in(t1, env).union(tyvars_in(t2, env)),
-        Expr::Seq(t1, t2) => tyvars_in_decl(t1, env).union(tyvars_in(t2, env)),
-        Expr::Neg(t1) => tyvars_in(t1, env),
-        Expr::BinOp(_, t1, t2) => tyvars_in(t1, env).union(tyvars_in(t2, env)),
+        App(t1, t2) => tyvars_in(t1, env).union(tyvars_in(t2, env)),
+        Seq(t1, t2) => tyvars_in_decl(t1, env).union(tyvars_in(t2, env)),
+        Neg(t1) => tyvars_in(t1, env),
+        BinOp(_, t1, t2) => tyvars_in(t1, env).union(tyvars_in(t2, env)),
     }
 }
 
@@ -286,10 +285,11 @@ fn fvs(expr: &Spanned<Expr>, acc: HashSet<String>) -> HashSet<String> {
     }
 }
 
-fn unify(c: HashSet<Constraint>) -> Option<Vec<(Type, Type)>> {
+// Either returns the substitutions or the failed constraint
+fn unify(c: HashSet<Constraint>) -> Result<Vec<(Type, Type)>, Constraint> {
     use Type::*;
     if c.is_empty() {
-        return Some(Vec::new());
+        return Ok(Vec::new());
     }
     let mut c = c.into_iter();
     let (s, t) = c.next().unwrap();
@@ -344,9 +344,12 @@ fn unify(c: HashSet<Constraint>) -> Option<Vec<(Type, Type)>> {
             subst
         })
     } else {
-        match (s, t) {
-            (Fn(s1, s2), Fn(t1, t2)) => unify(rest.update((*s1, *t1)).update((*s2, *t2))),
-            _ => None,
+        match (&s, &t) {
+            (Fn(s1, s2), Fn(t1, t2)) => unify(
+                rest.update((*s1.clone(), *t1.clone()))
+                    .update((*s2.clone(), *t2.clone())),
+            ),
+            _ => Err((s, t)),
         }
     }
 }
@@ -369,6 +372,6 @@ mod test {
         use super::Type::{self, *};
         let constraints = HashSet::new().update((Num, Bool));
         let unification = unify(constraints);
-        assert!(unification.is_none())
+        assert!(unification.is_err())
     }
 }
