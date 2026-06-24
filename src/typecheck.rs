@@ -13,13 +13,22 @@ static TYPE_VARIABLE: LazyLock<i32> = LazyLock::new(|| 1);
 type Constraint = (Type, Type);
 
 pub fn typecheck(decl: &Decl, env: &mut TypeEnv) -> Result<(Type, HashSet<Constraint>), TypeError> {
-    match decl {
-        Decl::Let(_, _, body) => typecheck_expr(body, env),
+    let (ty, cs) = match decl {
+        Decl::Let(v, t, body) => {
+            env.upd_env(v.clone(), t.clone());
+            let (ty, cs) = typecheck_expr(body, env)?;
+            let new_cs = cs.update((t.clone(), ty.clone()));
+            Ok((ty, new_cs))
+        }
         Decl::LetRec(f, ty, body) => {
             env.upd_env(f.to_string(), ty.clone());
             typecheck_expr(body, env)
         }
         Decl::Expr(e) => typecheck_expr(e, env),
+    }?;
+    match unify(cs.clone()) {
+        Ok(unification) => Ok((ty, cs)),
+        Err((expected, found)) => Err(TypeError::TypeMismatch { expected, found }),
     }
 }
 
@@ -91,12 +100,14 @@ pub fn typecheck_expr(
         }
         Expr::Neg(e) => typecheck_expr(e, env),
         Expr::LetIn(v, ty, t1, t2) => {
-            let (_, _) = typecheck_expr(t1, env)?; // otherwise t1 isnt checked if v not in fvs of t2
-            let (ty2, c) = typecheck_expr(&vsubst(v, t1, t2).with_span(expr.span), env)?;
-            Ok((ty2, c))
+            let (ty1, c1) = typecheck_expr(t1, env)?; // otherwise t1 isnt checked if v not in fvs of t2
+            let (ty2, c2) = typecheck_expr(&vsubst(v, t1, t2).with_span(expr.span), env)?;
+            match ty {
+                None => Ok((ty2, c1.union(c2))),
+                Some(t) => Ok((ty2, c1.union(c2).update((t.clone(), ty1)))),
+            }
         }
     }?;
-    dbg!(constraints.clone());
     match unify(constraints.clone()) {
         Err((expected, found)) => Err(TypeError::TypeMismatch { expected, found }),
         Ok(unification) => Ok((ty, constraints)),

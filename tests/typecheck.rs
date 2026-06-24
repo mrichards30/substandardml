@@ -89,6 +89,7 @@ fn test_polymorphic_fn_types() {
     );
 }
 
+// TODO these need to use unification to check equality, I think, to prevent them from being brittle.
 fn assert_type_ok(src: &str, ty: Type) {
     let res = &parser::parse(src).unwrap();
     assert_eq!(
