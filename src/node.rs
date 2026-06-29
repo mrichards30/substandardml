@@ -18,6 +18,8 @@ pub fn run(src: &str) -> String {
     );
     let js = codegen::gen_program(cps_ast, cps);
 
+    println!("{}", js);
+
     let output = Command::new("node").arg("-e").arg(&js).output().unwrap();
 
     String::from_utf8(output.stdout).unwrap().trim().to_string()

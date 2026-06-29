@@ -25,6 +25,13 @@ pub fn gen_binop(op: BinOp) -> String {
     }
 }
 
+fn dest_var(ast: &CpsAst, v: ValueId) -> String {
+    match &ast.vals[v] {
+        Value::Var(n) => n.clone(),
+        _ => panic!("not a var")
+    }
+}
+
 pub fn gen_cexpr(ast: &CpsAst, id: ExprId) -> String {
     match &ast.exprs[id] {
         CExpr::App(f, xs) =>
@@ -32,7 +39,8 @@ pub fn gen_cexpr(ast: &CpsAst, id: ExprId) -> String {
         CExpr::Fix(vs, body) =>
             format!("{}\n{}",
                     vs.iter().map(|(f, params, b)| {
-                        format!("function {}({}) {{ {} }}", f, params.iter().join(", "), gen_cexpr(ast, *b))
+                        let f_name = dest_var(ast, *f);
+                        format!("function {}({}) {{ {} }}", f_name, params.iter().map(|v| dest_var(ast, *v)).join(", "), gen_cexpr(ast, *b))
                     }).collect::<Vec<_>>().join("\n"),
                     gen_cexpr(ast, *body)),
         CExpr::PrimOp(op, inputs, outputs, cs) => {
@@ -40,7 +48,7 @@ pub fn gen_cexpr(ast: &CpsAst, id: ExprId) -> String {
             if cs.len() == 2 {
                 format!("if ({}) {{ {} }} else {{ {} }}", val, gen_cexpr(ast, cs[1]), gen_cexpr(ast, cs[0]))
             } else {
-                format!("let {} = {}\n{};", outputs[0], val, gen_cexpr(ast, cs[0]))
+                format!("let {} = {}\n{};", dest_var(ast, outputs[0]), val, gen_cexpr(ast, cs[0]))
             }
         }
         CExpr::Switch(_x, _branches) => "{}".to_string()

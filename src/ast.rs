@@ -261,16 +261,18 @@ pub enum CExpr {
 #[derive(Debug, Clone)]
 pub struct CpsAst<'src> {
     pub exprs: Vec<CExpr>,
-    pub vals: Vec<Value<'src>>,
     pub spans: Vec<CodeLoc>,
+    pub vals: Vec<Value<'src>>,
+    pub val_spans: Vec<CodeLoc>,
 }
 
 impl<'a> CpsAst<'a> {
     pub fn new() -> CpsAst<'a> {
         CpsAst {
             exprs: vec![],
+            spans: vec![],
             vals: vec![],
-            spans: vec![]
+            val_spans: vec![],
         }
     }
     pub fn push(&mut self, e: CExpr, l: CodeLoc) -> ExprId {
@@ -280,7 +282,7 @@ impl<'a> CpsAst<'a> {
     }
     pub fn push_val(&mut self, e: Value<'a>, l: CodeLoc) -> ExprId {
         self.vals.push(e);
-        self.spans.push(l);
-        self.exprs.len() - 1
+        self.val_spans.push(l);
+        self.vals.len() - 1
     }
 }

@@ -276,7 +276,6 @@ fn unify(c: HashSet<Constraint>) -> Result<Vec<(Type, Type)>, Constraint> {
 
 mod test {
     use im::HashSet;
-
     use crate::typecheck::unify;
 
     #[test]

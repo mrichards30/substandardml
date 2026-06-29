@@ -2,6 +2,7 @@ use crate::ast::{Ast, BinOp, CExpr, CodeLoc, CpsAst, Expr, ExprId, Value, ValueI
 
 fn fresh(counter: &mut u64, cps_ast: &mut CpsAst, span: CodeLoc) -> ValueId {
     let name = format!("k{}", counter);
+    *counter += 1;
     cps_ast.push_val(Value::Var(name), span)
 }
 
@@ -57,7 +58,7 @@ pub fn expr_to_cps(ast: &Ast, expr_id: ExprId, cps_ast: &mut CpsAst, k: ValueId,
             let fv = fresh(counter, cps_ast, span);
             let k2 = fresh(counter, cps_ast, span);
             let av = fresh(counter, cps_ast, span);
-            let app_ce = cps_ast.push(CExpr::App(fv, vec![av]), span);
+            let app_ce = cps_ast.push(CExpr::App(fv, vec![av, k]), span);
             let rator_ce = expr_to_cps(ast, *arg, cps_ast, k2, counter);
             let rand_ce = expr_to_cps(ast, *f, cps_ast, k1, counter);
             let cexpr =
