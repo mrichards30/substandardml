@@ -1,5 +1,5 @@
 use compiler::ast::Type::{Bool, Fn, Num, Tyvar};
-use compiler::ast::{Type, TypeEnv, TypeError};
+use compiler::ast::{lower, Ast, Type, TypeEnv, TypeError};
 use compiler::parser;
 use compiler::typecheck::typecheck_expr;
 
@@ -91,9 +91,11 @@ fn test_polymorphic_fn_types() {
 
 // TODO these need to use unification to check equality, I think, to prevent them from being brittle.
 fn assert_type_ok(src: &str, ty: Type) {
-    let res = &parser::parse(src).unwrap();
+    let res = parser::parse(src).unwrap();
+    let ast = &mut Ast::new();
+    let id = lower(ast, res);
     assert_eq!(
-        typecheck_expr(res, &mut TypeEnv::new()).map(|(a, b)| a),
+        typecheck_expr(ast, id, &mut TypeEnv::new()).map(|(a, b)| a),
         Ok(ty),
         "{}",
         src
@@ -101,9 +103,11 @@ fn assert_type_ok(src: &str, ty: Type) {
 }
 
 fn assert_type_err(src: &str, err: TypeError) {
-    let res = &parser::parse(src).unwrap();
+    let res = parser::parse(src).unwrap();
+    let ast = &mut Ast::new();
+    let id = lower(ast, res);
     assert_eq!(
-        typecheck_expr(res, &mut TypeEnv::new()),
+        typecheck_expr(ast, id, &mut TypeEnv::new()),
         Err(err),
         "{}",
         src

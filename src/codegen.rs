@@ -1,7 +1,8 @@
-use crate::ast::{CExpr, Value, BinOp};
+use crate::ast::{CExpr, Value, BinOp, CpsAst, ValueId, ExprId};
+use itertools::Itertools;
 
-pub fn gen_value(val: &Value) -> String {
-    match val {
+pub fn gen_value(ast: &CpsAst, val: ValueId) -> String {
+    match &ast.vals[val] {
         Value::Var(n) => n.clone(),
         Value::Label(l) => l.clone(),
         Value::Num(n) => n.to_string(),
@@ -24,28 +25,28 @@ pub fn gen_binop(op: BinOp) -> String {
     }
 }
 
-pub fn gen_cexpr(expr: &CExpr) -> String {
-    match expr {
+pub fn gen_cexpr(ast: &CpsAst, id: ExprId) -> String {
+    match &ast.exprs[id] {
         CExpr::App(f, xs) =>
-            format!("{}({})", gen_value(f), xs.iter().map(|x| gen_value(&x.inner)).collect::<Vec<_>>().join(", ")),
+            format!("{}({})", gen_value(ast, *f), xs.iter().map(|x| gen_value(ast, *x)).collect::<Vec<_>>().join(", ")),
         CExpr::Fix(vs, body) =>
             format!("{}\n{}",
                     vs.iter().map(|(f, params, b)| {
-                        format!("function {}({}) {{ {} }}", f, params.join(", "), gen_cexpr(b))
+                        format!("function {}({}) {{ {} }}", f, params.iter().join(", "), gen_cexpr(ast, *b))
                     }).collect::<Vec<_>>().join("\n"),
-                    gen_cexpr(body)),
+                    gen_cexpr(ast, *body)),
         CExpr::PrimOp(op, inputs, outputs, cs) => {
-            let val = inputs.iter().map(gen_value).collect::<Vec<_>>().join(&format!(" {} ", gen_binop(op.inner.clone())));
+            let val = inputs.iter().map(|e| gen_value(ast, *e)).collect::<Vec<_>>().join(&format!(" {} ", gen_binop(*op)));
             if cs.len() == 2 {
-                format!("if ({}) {{ {} }} else {{ {} }}", val, gen_cexpr(&cs[1]), gen_cexpr(&cs[0]))
+                format!("if ({}) {{ {} }} else {{ {} }}", val, gen_cexpr(ast, cs[1]), gen_cexpr(ast, cs[0]))
             } else {
-                format!("let {} = {}\n{};", outputs[0], val, gen_cexpr(&cs[0]))
+                format!("let {} = {}\n{};", outputs[0], val, gen_cexpr(ast, cs[0]))
             }
         }
         CExpr::Switch(_x, _branches) => "{}".to_string()
     }
 }
 
-pub fn gen_program(expr: &CExpr) -> String {
-    format!("\"use strict\";\n{}", gen_cexpr(expr))
+pub fn gen_program(ast: &CpsAst, id: ExprId) -> String {
+    format!("\"use strict\";\n{}", gen_cexpr(ast, id))
 }

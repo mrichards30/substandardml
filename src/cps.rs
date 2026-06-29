@@ -1,122 +1,139 @@
-use chumsky::span::{SpanWrap, Spanned};
-use crate::ast::{Value, CExpr, Expr, BinOp, Decl};
+use crate::ast::{Ast, BinOp, CExpr, CodeLoc, CpsAst, Expr, ExprId, Value, ValueId};
 
-fn fresh(counter: &mut u64) -> String {
+fn fresh(counter: &mut u64, cps_ast: &mut CpsAst, span: CodeLoc) -> ValueId {
     let name = format!("k{}", counter);
-    *counter += 1;
-    name
+    cps_ast.push_val(Value::Var(name), span)
 }
 
-pub fn to_cps(decl: &Decl, k: Value, counter: &mut u64) -> Spanned<CExpr> {
-    match decl {
-        Decl::Let(_, _, expr) => expr_to_cps(expr, k, counter), // TODO
-        Decl::LetRec(_, _, expr) => expr_to_cps(expr, k, counter), // TODO
-        Decl::Expr(expr) => expr_to_cps(expr, k, counter)
-    }
-}
-
-pub fn expr_to_cps(expr: &Spanned<Expr>, k: Value, counter: &mut u64) -> Spanned<CExpr> {
-    let k_span = k.clone().with_span(expr.span);
-    match &expr.inner {
-        Expr::Var(p) => CExpr::App(k_span, vec![Value::Var(p.to_string()).with_span(expr.span)]).with_span(expr.span),
-        Expr::Num(n) => CExpr::App(k_span, vec![Value::Num(*n).with_span(expr.span)]).with_span(expr.span),
-        Expr::Bool(true) => CExpr::App(k_span, vec![Value::Num(1f64).with_span(expr.span)]).with_span(expr.span),
-        Expr::Bool(false) => CExpr::App(k_span, vec![Value::Num(0f64).with_span(expr.span)]).with_span(expr.span),
-        Expr::Unit => CExpr::App(k_span, vec![Value::Num(0f64).with_span(expr.span)]).with_span(expr.span),
-        Expr::If(cond, then, else_) => {
-            let k1 = fresh(counter);
-            let v1 = fresh(counter);
-            CExpr::Fix(
-                vec![(k1.to_string(), vec![v1.to_string()],
-                      Box::new(CExpr::PrimOp(
-                          BinOp::Eq.with_span(cond.span),
-                          vec![Value::Var(v1), Value::Num(1f64)],
-                          vec![],
-                          vec![
-                              expr_to_cps(&else_, k.clone(), counter),
-                              expr_to_cps(&then, k, counter),
-                          ]
-                      ).with_span(expr.span)))],
-                Box::new(expr_to_cps(cond, Value::Var(k1), counter))).with_span(expr.span)
+pub fn expr_to_cps(ast: &Ast, expr_id: ExprId, cps_ast: &mut CpsAst, k: ValueId, counter: &mut u64) -> ExprId {
+    let span = ast.spans[expr_id];
+    match &ast.exprs[expr_id] {
+        Expr::Var(p) => {
+            let v = cps_ast.push_val(Value::Var(p.to_string()), ast.spans[expr_id]);
+            cps_ast.push(CExpr::App(k, vec![v]), span)
         }
-        Expr::LetIn(x, ty, body, in_) =>
-            // so lazy... write a custom translation?
-            expr_to_cps(&Expr::App(
-                Box::new(Expr::Fn(x.clone(), ty.clone(), in_.clone()).with_span(body.span)),
-                body.clone()).with_span(expr.span), k, counter),
+        Expr::Num(n) => {
+            let v = cps_ast.push_val(Value::Num(*n), ast.spans[expr_id]);
+            cps_ast.push(CExpr::App(k, vec![v]), span)
+        }
+        Expr::Bool(true) => {
+            let v = cps_ast.push_val(Value::Num(1f64), ast.spans[expr_id]);
+            cps_ast.push(CExpr::App(k, vec![v]), span)
+        }
+        Expr::Bool(false) => {
+            let v = cps_ast.push_val(Value::Num(0f64), ast.spans[expr_id]);
+            cps_ast.push(CExpr::App(k, vec![v]), span)
+        }
+        Expr::Unit => {
+            let v = cps_ast.push_val(Value::Num(0f64), ast.spans[expr_id]);
+            cps_ast.push(CExpr::App(k, vec![v]), span)
+        }
+        Expr::If(cond, then, else_) => {
+            let k1 = fresh(counter, cps_ast, span);
+            let v1 = fresh(counter, cps_ast, span);
+            let v2 = cps_ast.push_val(Value::Num(1f64), ast.spans[expr_id]);
+            let else_cps = expr_to_cps(ast, *else_, cps_ast, k, counter);
+            let then_cps = expr_to_cps(ast, *then, cps_ast, k, counter);
+            let cond_cps = expr_to_cps(ast, *cond, cps_ast, k1, counter);
+            let cexpr =
+                CExpr::Fix(vec![(k1, vec![v1],
+                                 cps_ast.push(CExpr::PrimOp(
+                                     BinOp::Eq,
+                                     vec![v1, v2],
+                                     vec![],
+                                     vec![else_cps, then_cps]), span))],
+                           cond_cps);
+            cps_ast.push(cexpr, span)
+        }
+        Expr::LetIn(x, ty, body, in_) => {
+            // TODO make this case better
+            let ast1 = &mut ast.clone();
+            let rand = ast1.push(Expr::Fn(x, ty.clone(), *in_), span);
+            let app = ast1.push(Expr::App(rand, *body), span);
+            expr_to_cps(ast1, app, cps_ast, k, counter)
+        },
         Expr::App(f, arg) => {
-            let k1 = fresh(counter);
-            let fv = fresh(counter);
-            let k2 = fresh(counter);
-            let av = fresh(counter);
-            CExpr::Fix(
-                vec![(k1.clone(), vec![fv.clone()],
-                      Box::new(CExpr::Fix(
-                          vec![(k2.clone(), vec![av.clone()],
-                                Box::new(CExpr::App(
-                                    Value::Var(fv).with_span(f.span),
-                                    vec![Value::Var(av).with_span(f.span), k_span]  // pass continuation as last arg
-                                ).with_span(f.span)))],
-                          Box::new(expr_to_cps(arg, Value::Var(k2), counter))).with_span(expr.span)))],
-                Box::new(expr_to_cps(f, Value::Var(k1), counter))).with_span(expr.span)
+            let k1 = fresh(counter, cps_ast, span);
+            let fv = fresh(counter, cps_ast, span);
+            let k2 = fresh(counter, cps_ast, span);
+            let av = fresh(counter, cps_ast, span);
+            let app_ce = cps_ast.push(CExpr::App(fv, vec![av]), span);
+            let rator_ce = expr_to_cps(ast, *arg, cps_ast, k2, counter);
+            let rand_ce = expr_to_cps(ast, *f, cps_ast, k1, counter);
+            let cexpr =
+                CExpr::Fix(
+                    vec![(k1, vec![fv],
+                          cps_ast.push(CExpr::Fix(vec![(k2, vec![av], app_ce)],
+                              rator_ce), span))],
+                    rand_ce);
+            cps_ast.push(cexpr, span)
         }
         Expr::Seq(lhs, rhs) => {
-            let k1 = fresh(counter);
-            let v1 = fresh(counter);
-            CExpr::Fix(
-                vec![(k1.clone(), vec![v1],
-                      Box::new(expr_to_cps(rhs, k, counter)))],
-                Box::new(to_cps(lhs, Value::Var(k1), counter))).with_span(expr.span)
+            let k1 = fresh(counter, cps_ast, span);
+            let v1 = fresh(counter, cps_ast, span);
+            let cexpr =
+                CExpr::Fix(vec![(k1, vec![v1], expr_to_cps(ast, *rhs, cps_ast, k, counter))],
+                           expr_to_cps(ast, *lhs, cps_ast, k1, counter));
+            cps_ast.push(cexpr, span)
         }
-        Expr::Neg(e) =>
-            expr_to_cps(&Expr::BinOp(
-                BinOp::Minus.with_span(expr.span),
-                Box::new(Expr::Num(0.0).with_span(expr.span)),
-                e.clone()).with_span(expr.span), k, counter),
+        Expr::Neg(e) => {
+            // TODO change this to use primop directly
+            let ast1 = &mut ast.clone();
+            let zero = ast1.push(Expr::Num(0f64), span);
+            let app = ast1.push(Expr::BinOp(BinOp::Minus, zero, *e), span);
+            expr_to_cps(ast1, app, cps_ast, k, counter)
+        }
         Expr::BinOp(op, lhs, rhs) => {
-            let k1 = fresh(counter);
-            let v1 = fresh(counter);
-            let k2 = fresh(counter);
-            let v2 = fresh(counter);
-            let primop_cexp = match op.inner {
+            let k1 = fresh(counter, cps_ast, span);
+            let v1 = fresh(counter, cps_ast, span);
+            let k2 = fresh(counter, cps_ast, span);
+            let v2 = fresh(counter, cps_ast, span);
+            let primop_cexp = match op {
                 BinOp::Plus | BinOp::Minus | BinOp::Times | BinOp::Div => {
-                    let result = fresh(counter);
+                    let result = fresh(counter, cps_ast, span);
                     CExpr::PrimOp(
-                        op.clone(),
-                        vec![Value::Var(v1.clone()), Value::Var(v2.clone())],
-                        vec![result.clone()],
-                        vec![CExpr::App(k_span, vec![Value::Var(result).with_span(expr.span)])
-                            .with_span(expr.span)]
+                        *op,
+                        vec![v1, v2],
+                        vec![result],
+                        vec![cps_ast.push(CExpr::App(k, vec![result]), span)]
                     )
                 }
                 BinOp::Eq | BinOp::Neq | BinOp::Geq | BinOp::Gt | BinOp::Leq | BinOp::Lt => {
+                    let zero_ce = cps_ast.push_val(Value::Num(0f64), span);
+                    let one_ce = cps_ast.push_val(Value::Num(1f64), span);
                     CExpr::PrimOp(
                         op.clone(),
-                        vec![Value::Var(v1.clone()), Value::Var(v2.clone())],
+                        vec![v1, v2],
                         vec![],
                         vec![
-                            CExpr::App(k_span.clone(), vec![Value::Num(0f64).with_span(expr.span)]).with_span(expr.span), // false
-                            CExpr::App(k_span, vec![Value::Num(1f64).with_span(expr.span)]).with_span(expr.span), // true
+                            cps_ast.push(CExpr::App(k, vec![zero_ce]), span),
+                            cps_ast.push(CExpr::App(k, vec![one_ce]), span),
                         ]
                     )
                 }
-            }.with_span(expr.span);
-            CExpr::Fix(
-                vec![(k1.clone(), vec![v1],
-                      Box::new(CExpr::Fix(
-                          vec![(k2.clone(), vec![v2],
-                                Box::new(primop_cexp))],
-                          Box::new(expr_to_cps(rhs, Value::Var(k2), counter))).with_span(expr.span)))],
-                Box::new(expr_to_cps(lhs, Value::Var(k1), counter))).with_span(expr.span)
+            };
+            let primop_cexp_id = cps_ast.push(primop_cexp, span);
+            let rhs_ce = expr_to_cps(ast, *rhs, cps_ast, k2, counter);
+            let lhs_ce = expr_to_cps(ast, *lhs, cps_ast, k1, counter);
+            let cexpr =
+                CExpr::Fix(
+                    vec![(k1, vec![v1],
+                          cps_ast.push(CExpr::Fix(
+                              vec![(k2, vec![v2], primop_cexp_id)],
+                              rhs_ce), span))],
+                    lhs_ce);
+            cps_ast.push(cexpr, span)
         }
         Expr::Fn(x, _ty, body) => {
-            let f = fresh(counter);
-            let k_param = fresh(counter);
-            CExpr::Fix(
-                vec![(f.clone(), vec![x.to_string(), k_param.clone()],
-                      Box::new(expr_to_cps(body, Value::Var(k_param), counter)))],
-                Box::new(CExpr::App(k_span, vec![Value::Var(f).with_span(x.span)]).with_span(expr.span)))
-                .with_span(expr.span)
+            let f = fresh(counter, cps_ast, span);
+            let k_param = fresh(counter, cps_ast, span);
+            let xv = cps_ast.push_val(Value::Var(x.to_string()), span);
+            let cexpr =
+                CExpr::Fix(
+                    vec![(f, vec![xv, k_param],
+                          expr_to_cps(ast, *body, cps_ast, k_param, counter))],
+                    cps_ast.push(CExpr::App(k, vec![f]), span));
+            cps_ast.push(cexpr, span)
         },
     }
 }

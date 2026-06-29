@@ -11,6 +11,7 @@ ariadne = "0.6"
 im = "15"
 wasm-bindgen = "0.2.125"
 console_error_panic_hook = "0.1.7"
+itertools = "0.15.0"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

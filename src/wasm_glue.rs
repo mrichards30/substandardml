@@ -1,4 +1,4 @@
-use crate::ast::{Decl, TypeEnv, Value};
+use crate::ast::{lower, Ast, CpsAst, TypeEnv, Value};
 use crate::{codegen, cps, parser, typecheck};
 use std::panic;
 use wasm_bindgen::prelude::*;
@@ -16,24 +16,31 @@ pub fn init_compiler() {
 
 #[wasm_bindgen]
 pub fn compile_to_js(src: String) -> JsResult {
-    let decl = parser::parse(&src);
+    let ast = &mut Ast::new();
+    let cps_ast = &mut CpsAst::new();
+    let decl = parser::parse(&src).map(|e| lower(ast, e));
     match decl {
-        Ok(e) => match typecheck::typecheck_expr(&e, &mut TypeEnv::new()) {
-            Ok(_) => {
-                let cps = cps::to_cps(
-                    &Decl::Expr(e),
-                    Value::Var("console.log".to_string()),
-                    &mut 0,
-                );
-                JsResult {
-                    js: codegen::gen_program(&cps),
-                    errors: vec![],
+        Ok(expr_id) => {
+            match typecheck::typecheck_expr(ast, expr_id, &mut TypeEnv::new()) {
+                Ok(_) => {
+                    let logger = cps_ast.push_val(Value::Var("console.log".to_string()), (0, 0));
+                    let cps = cps::expr_to_cps(
+                        ast,
+                        expr_id,
+                        cps_ast,
+                        logger,
+                        &mut 0,
+                    );
+                    JsResult {
+                        js: codegen::gen_program(cps_ast, cps),
+                        errors: vec![],
+                    }
                 }
+                Err(_) => JsResult {
+                    js: "false".to_string(),
+                    errors: vec!["type error".to_string()],
+                },
             }
-            Err(_) => JsResult {
-                js: "false".to_string(),
-                errors: vec!["type error".to_string()],
-            },
         },
         Err(err) => JsResult {
             js: "false".to_string(),
