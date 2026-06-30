@@ -226,8 +226,8 @@ impl TypeEnv {
         }
     }
 
-    pub fn upd_env(&mut self, s: String, v: Scheme) {
-        self.env.insert(s, v);
+    pub fn upd_env(&self, s: String, v: Scheme) -> TypeEnv {
+        TypeEnv { env: self.env.update(s, v) }
     }
 
     pub fn get_env(&self, s: String) -> Option<Scheme> {

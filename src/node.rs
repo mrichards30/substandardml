@@ -6,7 +6,7 @@ pub fn run1(src: &str) -> (Type, String) {
     let pexpr = parser::parse(src).unwrap();
     let ast = &mut Ast::new();
     let id = lower(ast, pexpr);
-    let ty = typecheck::typecheck(ast, id, &mut TypeEnv::new()).unwrap();
+    let ty = typecheck::typecheck(ast, id, &TypeEnv::new()).unwrap();
     let cps_ast = &mut CpsAst::new();
     let k = cps_ast.push_val(Value::Var("console.log".to_string()), (0, 0));
     let cps = cps::expr_to_cps(

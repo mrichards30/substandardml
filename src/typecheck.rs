@@ -12,7 +12,7 @@ type Constraint = (Type, Type);
 fn typecheck_expr(
     ast: &Ast,
     expr_id: ExprId,
-    env: &mut TypeEnv,
+    env: &TypeEnv,
 ) -> Result<(Type, HashSet<Constraint>), TypeError> {
     match &ast.exprs[expr_id] {
         Expr::Var(name) => {
@@ -37,19 +37,16 @@ fn typecheck_expr(
             Ok((ty2, new_cs))
         }
         Expr::Fn(v, Some(ty_provided), body) => {
-            env.upd_env(v.to_string(), (vec![], ty_provided.clone()));
-            let (ty_body, cs) = typecheck_expr(ast, *body, env)?;
+            let (ty_body, cs) = typecheck_expr(ast, *body, &env.upd_env(v.to_string(), (vec![], ty_provided.clone())))?;
             Ok((Type::Fn(Box::new(ty_provided.clone()), Box::new(ty_body)), cs))
         }
         Expr::Fn(v, None, body) => {
             let x = gen_tyvar();
-            env.upd_env(v.to_string(), (vec![], x.clone()));
-            let (t, c) = typecheck_expr(ast, *body, env)?;
+            let (t, c) = typecheck_expr(ast, *body, &env.upd_env(v.to_string(), (vec![], x.clone())))?;
             Ok((Type::Fn(Box::new(x.clone()), Box::new(t)), c))
         }
         Expr::App(t1, t2) => {
-            let mut t1_env = env.clone();
-            let (ty1, c1) = typecheck_expr(ast, *t1, &mut t1_env)?;
+            let (ty1, c1) = typecheck_expr(ast, *t1, env)?;
             let (ty2, c2) = typecheck_expr(ast, *t2, env)?;
             let fresh_tyvar = gen_tyvar();
             let new_cs = c1
@@ -81,8 +78,7 @@ fn typecheck_expr(
         Expr::Neg(e) => typecheck_expr(ast, *e, env),
         Expr::LetIn(x, Some(ty), t1, t2) => {
             let (ty1, _) = typecheck_expr(ast, *t1, env)?;
-            env.upd_env(x.to_string(), (vec![], ty.clone()));
-            let (ty2, c2) = typecheck_expr(ast, *t2, env)?;
+            let (ty2, c2) = typecheck_expr(ast, *t2, &env.upd_env(x.to_string(), (vec![], ty.clone())))?;
             Ok((ty2, c2.update((ty1, ty.clone()))))
         }
         Expr::LetIn(x, None, t1, t2) => {
@@ -90,8 +86,7 @@ fn typecheck_expr(
             let sigma = unify1(c1)?;
             let pt1 = type_subst(s1, sigma);
             let pts1 = generalise(env, pt1);
-            env.upd_env(x.to_string(), pts1);
-            typecheck_expr(ast, *t2, env)
+            typecheck_expr(ast, *t2, &env.upd_env(x.to_string(), pts1))
         }
     }
 }
@@ -119,7 +114,7 @@ fn inst(scheme: Scheme) -> Type {
     type_subst(ty, substs)
 }
 
-fn tyvars_in_env(env: TypeEnv) -> HashSet<String> {
+fn tyvars_in_env(env: &TypeEnv) -> HashSet<String> {
     env.get_env_map().values()
         .map(|(_, e)| tyvars_in_ty(e))
         .flatten()
@@ -127,14 +122,15 @@ fn tyvars_in_env(env: TypeEnv) -> HashSet<String> {
 }
 
 fn generalise(env: &TypeEnv, ty: Type) -> Scheme {
+    let env_tvs = tyvars_in_env(env);
     let new_vars = tyvars_in_ty(&ty).iter()
-        .filter(|e| !tyvars_in_env(env.clone()).contains(e.to_owned()))
+        .filter(|e| !env_tvs.contains(e.to_owned()))
         .map(|e| e.to_string())
         .collect_vec();
     (new_vars, ty)
 }
 
-pub fn typecheck(ast: &mut Ast, expr_id: ExprId, env: &mut TypeEnv) -> Result<Type, TypeError> {
+pub fn typecheck(ast: &mut Ast, expr_id: ExprId, env: &TypeEnv) -> Result<Type, TypeError> {
     let (ty, cs) = typecheck_expr(ast, expr_id, env)?;
     let sigma = unify1(cs)?;
     Ok(type_subst(ty, sigma))

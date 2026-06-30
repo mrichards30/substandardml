@@ -95,7 +95,7 @@ fn assert_type_ok(src: &str, ty: Type) {
     let ast = &mut Ast::new();
     let id = lower(ast, res);
     assert_eq!(
-        typecheck(ast, id, &mut TypeEnv::new()),
+        typecheck(ast, id, &TypeEnv::new()),
         Ok(ty),
         "{}",
         src
@@ -107,7 +107,7 @@ fn assert_type_err(src: &str, err: TypeError) {
     let ast = &mut Ast::new();
     let id = lower(ast, res);
     assert_eq!(
-        typecheck(ast, id, &mut TypeEnv::new()),
+        typecheck(ast, id, &TypeEnv::new()),
         Err(err),
         "{}",
         src
