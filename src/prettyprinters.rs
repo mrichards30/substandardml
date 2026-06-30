@@ -1,4 +1,15 @@
-// use crate::ast::{CExpr, Value};
+use crate::ast::{Type};
+
+pub fn print_type(ty: &Type) -> String {
+    match ty {
+        Type::Num => "num".to_string(),
+        Type::Bool => "num".to_string(),
+        Type::Unit => "unit".to_string(),
+        Type::Fn(l, r) => format!("{} -> {}", print_type(l), print_type(r)),
+        Type::Tyvar(n) => format!("'{}", n.to_string())
+    }
+}
+
 //
 // pub fn print_value(val: &Value) -> String {
 //     match val {
