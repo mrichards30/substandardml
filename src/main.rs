@@ -1,14 +1,14 @@
-use compiler::ast::TypeEnv;
-use compiler::parser;
-use compiler::typecheck::typecheck_expr;
+use std::io;
+use compiler::node;
 
 fn main() {
-    // println!("{:?}", parser::prs("let x: num = 5 in x + 1"));
-    // println!("{:?}", parser::prs("let x: bool = true in if x then true else false"));
-    // println!("{:?}", parser::prs("fn x: bool => if x then true else false"));
-    // println!("{:?}", parser::prs("fn x => if x then true else false"));
-    // println!("{:?}", parser::prs("fn x: num => if x >= 5 then true else false"));
-    // println!("{:?}", parser::prs("(fn x: num => if x >= 5 then true else false) 6"));
-    // println!("{:?}", parser::prs("(fn x: num => if x >= 5 then true else false)(6)"));
-    // println!("{:?}", parser::prs("(fn x: num => if x >= 5 then true else false)6"));
+    // TODO wip and show error messages instead of panicking
+    loop {
+        let mut input = String::new();
+        io::stdin()
+            .read_line(&mut input)
+            .expect("Failed to read line");
+        let (ty, eval) = node::run1(input.trim());
+        println!("> {} : {:?}", eval, ty);
+    }
 }

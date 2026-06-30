@@ -30,7 +30,7 @@ fn test_fn() {
 
 #[test]
 fn test_let() {
-    assert_eq!(node::run("let x: num = 5 in x"), "5");
+    assert_eq!(node::run("let x = 5 in x"), "5");
 }
 
 #[test]

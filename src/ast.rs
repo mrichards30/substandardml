@@ -79,6 +79,8 @@ pub enum Type {
     Tyvar(String),
 }
 
+pub type Scheme = (Vec<String>, Type);
+
 #[derive(Debug, Clone)]
 pub enum Decl<'src> {
     Let(String, Type, Spanned<PExpr<'src>>),
@@ -214,7 +216,7 @@ fn to_code_loc(span: SimpleSpan) -> CodeLoc {
 
 #[derive(Debug, Clone)]
 pub struct TypeEnv {
-    env: HashMap<String, Type>,
+    env: HashMap<String, Scheme>,
 }
 
 impl TypeEnv {
@@ -224,12 +226,16 @@ impl TypeEnv {
         }
     }
 
-    pub fn upd_env(&mut self, s: String, v: Type) {
+    pub fn upd_env(&mut self, s: String, v: Scheme) {
         self.env.insert(s, v);
     }
 
-    pub fn get_env(&self, s: String) -> Option<Type> {
+    pub fn get_env(&self, s: String) -> Option<Scheme> {
         self.env.get(&s).cloned()
+    }
+
+    pub fn get_env_map(&self) -> HashMap<String, Scheme> {
+        self.env.clone()
     }
 }
 

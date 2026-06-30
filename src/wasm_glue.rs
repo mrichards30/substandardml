@@ -21,7 +21,7 @@ pub fn compile_to_js(src: String) -> JsResult {
     let decl = parser::parse(&src).map(|e| lower(ast, e));
     match decl {
         Ok(expr_id) => {
-            match typecheck::typecheck_expr(ast, expr_id, &mut TypeEnv::new()) {
+            match typecheck::typecheck(ast, expr_id, &mut TypeEnv::new()) {
                 Ok(_) => {
                     let logger = cps_ast.push_val(Value::Var("console.log".to_string()), (0, 0));
                     let cps = cps::expr_to_cps(

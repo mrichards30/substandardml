@@ -1,23 +1,23 @@
-use std::ops::Add;
-use std::sync::LazyLock;
+use std::sync::atomic::{AtomicI32, Ordering};
 
 use crate::ast::Type::Tyvar;
-use crate::ast::{Ast, BinOp, Expr, ExprId, Type, TypeEnv, TypeError};
+use crate::ast::{Ast, BinOp, Expr, ExprId, Scheme, Type, TypeEnv, TypeError};
 use im::{HashMap, HashSet};
+use itertools::Itertools;
 
-static TYPE_VARIABLE: LazyLock<i32> = LazyLock::new(|| 1);
+static TYPE_VARIABLE: AtomicI32 = AtomicI32::new(0);
 
 type Constraint = (Type, Type);
 
-pub fn typecheck_expr(
+fn typecheck_expr(
     ast: &Ast,
     expr_id: ExprId,
     env: &mut TypeEnv,
 ) -> Result<(Type, HashSet<Constraint>), TypeError> {
-    let (ty, constraints) = match &ast.exprs[expr_id] {
+    match &ast.exprs[expr_id] {
         Expr::Var(name) => {
-            if let Some(ty) = env.get_env(name.to_string()) {
-                Ok((ty, HashSet::new()))
+            if let Some(scheme) = env.get_env(name.to_string()) {
+                Ok((inst(scheme), HashSet::new()))
             } else {
                 Err(TypeError::UnboundVariable(name.to_string()))
             }
@@ -36,19 +36,21 @@ pub fn typecheck_expr(
                 .update((ty2.clone(), ty3));
             Ok((ty2, new_cs))
         }
-        Expr::Fn(v, ty, body) => {
-            let ty_provided = ty.clone().unwrap_or(gen_tyvar());
-            env.upd_env(v.to_string(), ty_provided.clone());
+        Expr::Fn(v, Some(ty_provided), body) => {
+            env.upd_env(v.to_string(), (vec![], ty_provided.clone()));
             let (ty_body, cs) = typecheck_expr(ast, *body, env)?;
-            Ok((Type::Fn(Box::new(ty_provided), Box::new(ty_body)), cs))
+            Ok((Type::Fn(Box::new(ty_provided.clone()), Box::new(ty_body)), cs))
+        }
+        Expr::Fn(v, None, body) => {
+            let x = gen_tyvar();
+            env.upd_env(v.to_string(), (vec![], x.clone()));
+            let (t, c) = typecheck_expr(ast, *body, env)?;
+            Ok((Type::Fn(Box::new(x.clone()), Box::new(t)), c))
         }
         Expr::App(t1, t2) => {
-            // FIXME these should not be mutating env
             let mut t1_env = env.clone();
             let (ty1, c1) = typecheck_expr(ast, *t1, &mut t1_env)?;
             let (ty2, c2) = typecheck_expr(ast, *t2, env)?;
-            // TODO transcribe the lots of side conditions from figure 22-1 from pierce
-            // TODO also genvar needs to be over a set of terms and the below line fixed
             let fresh_tyvar = gen_tyvar();
             let new_cs = c1
                 .union(c2)
@@ -77,14 +79,65 @@ pub fn typecheck_expr(
             Ok((Type::Num, new_cs))
         }
         Expr::Neg(e) => typecheck_expr(ast, *e, env),
-        Expr::LetIn(v, ty, t1, t2) => {
-            todo!()
+        Expr::LetIn(x, Some(ty), t1, t2) => {
+            let (ty1, _) = typecheck_expr(ast, *t1, env)?;
+            env.upd_env(x.to_string(), (vec![], ty.clone()));
+            let (ty2, c2) = typecheck_expr(ast, *t2, env)?;
+            Ok((ty2, c2.update((ty1, ty.clone()))))
         }
-    }?;
-    match unify(constraints.clone()) {
-        Err((expected, found)) => Err(TypeError::TypeMismatch { expected, found }),
-        Ok(unification) => Ok((ty, constraints)),
+        Expr::LetIn(x, None, t1, t2) => {
+            let (s1, c1) = typecheck_expr(ast, *t1, env)?;
+            let sigma = unify1(c1)?;
+            let pt1 = type_subst(s1, sigma);
+            let pts1 = generalise(env, pt1);
+            env.upd_env(x.to_string(), pts1);
+            typecheck_expr(ast, *t2, env)
+        }
     }
+}
+
+fn unify1(cs: HashSet<Constraint>) -> Result<HashMap<String, Type>, TypeError> {
+    match unify(cs) {
+        Err((expected, found)) => Err(TypeError::TypeMismatch { expected, found }),
+        Ok(sigma) => {
+            let res: HashMap<String, Type> = sigma.iter().map(|e|
+                match &e {
+                    (Tyvar(n), r) => (n.to_string(), r.clone()),
+                    (l, Tyvar(n)) => (n.to_string(), l.clone()),
+                    _ => panic!("neither side is a tyvar"),
+                }).collect();
+            Ok(res)
+        }
+    }
+}
+
+fn inst(scheme: Scheme) -> Type {
+    let (binders, ty) = scheme;
+    let substs = binders.iter()
+        .map(|e| (e.to_string(), gen_tyvar()))
+        .collect();
+    type_subst(ty, substs)
+}
+
+fn tyvars_in_env(env: TypeEnv) -> HashSet<String> {
+    env.get_env_map().values()
+        .map(|(_, e)| tyvars_in_ty(e))
+        .flatten()
+        .collect()
+}
+
+fn generalise(env: &TypeEnv, ty: Type) -> Scheme {
+    let new_vars = tyvars_in_ty(&ty).iter()
+        .filter(|e| !tyvars_in_env(env.clone()).contains(e.to_owned()))
+        .map(|e| e.to_string())
+        .collect_vec();
+    (new_vars, ty)
+}
+
+pub fn typecheck(ast: &mut Ast, expr_id: ExprId, env: &mut TypeEnv) -> Result<Type, TypeError> {
+    let (ty, cs) = typecheck_expr(ast, expr_id, env)?;
+    let sigma = unify1(cs)?;
+    Ok(type_subst(ty, sigma))
 }
 
 fn is_comparison_op(op: &BinOp) -> bool {
@@ -92,43 +145,6 @@ fn is_comparison_op(op: &BinOp) -> bool {
     match op {
         Eq | Neq | Geq | Gt | Leq | Lt => true,
         _ => false,
-    }
-}
-
-fn tyvars_in(ast: &Ast, id: ExprId, env: &TypeEnv) -> HashSet<String> {
-    use Expr::*;
-    match &ast.exprs[id] {
-        Var(n) => {
-            if let Some(v) = env.get_env(n.to_string()) {
-                tyvars_in_ty(&v)
-            } else {
-                HashSet::new()
-            }
-        }
-        Num(_) | Bool(_) | Unit => HashSet::new(),
-        If(t1, t2, t3) => tyvars_in(ast, *t1, env)
-            .union(tyvars_in(ast, *t2, env))
-            .union(tyvars_in(ast, *t3, env)),
-        LetIn(_, ty, t1, t2) => {
-            let acc = tyvars_in(ast, *t1, env).union(tyvars_in(ast, *t2, env));
-            if let Some(v) = ty {
-                acc.union(tyvars_in_ty(&v))
-            } else {
-                acc
-            }
-        }
-        Fn(_, ty, t1) => {
-            let acc = tyvars_in(ast, *t1, env);
-            if let Some(v) = ty {
-                acc.union(tyvars_in_ty(&v))
-            } else {
-                acc
-            }
-        }
-        App(t1, t2) => tyvars_in(ast, *t1, env).union(tyvars_in(ast, *t2, env)),
-        Seq(t1, t2) => tyvars_in(ast, *t1, env).union(tyvars_in(ast, *t2, env)),
-        Neg(t1) => tyvars_in(ast, *t1, env),
-        BinOp(_, t1, t2) => tyvars_in(ast, *t1, env).union(tyvars_in(ast, *t2, env)),
     }
 }
 
@@ -172,7 +188,7 @@ fn idx_to_var_tests() {
 }
 
 pub fn gen_tyvar() -> Type {
-    let idx = TYPE_VARIABLE.add(1);
+    let idx = TYPE_VARIABLE.fetch_add(1, Ordering::Relaxed);
     Tyvar(idx_to_tvar(idx))
 }
 
@@ -186,22 +202,6 @@ fn type_subst(ty: Type, substs: HashMap<String, Type>) -> Type {
             Box::new(type_subst(*ty2, substs)),
         ),
         Tyvar(ref x) => substs.get(&*x).unwrap_or(&ty).clone(),
-    }
-}
-
-fn fvs(ast: &Ast, id: ExprId, acc: HashSet<String>) -> HashSet<String> {
-    match ast.exprs[id] {
-        Expr::Var(n) => acc.update(n.to_string()),
-        Expr::Num(_) => acc,
-        Expr::Bool(_) => acc,
-        Expr::Unit => acc,
-        Expr::If(e1, e2, e3) => fvs(ast, e1, fvs(ast, e2, fvs(ast, e3, acc))),
-        Expr::LetIn(v, _, e1, e2) => fvs(ast, e1, fvs(ast, e2, acc).without(v)),
-        Expr::Fn(v, _, e1) => fvs(ast, e1, acc).without(v),
-        Expr::App(e1, e2) => fvs(ast, e1, fvs(ast, e2, acc)),
-        Expr::Seq(e1, e2) => fvs(ast, e1, fvs(ast, e2, acc)),
-        Expr::Neg(e1) => fvs(ast, e1, acc),
-        Expr::BinOp(_, e1, e2) => fvs(ast, e1, fvs(ast, e2, acc)),
     }
 }
 

@@ -1,7 +1,7 @@
 use compiler::ast::Type::{Bool, Fn, Num, Tyvar};
 use compiler::ast::{lower, Ast, Type, TypeEnv, TypeError};
 use compiler::parser;
-use compiler::typecheck::typecheck_expr;
+use compiler::typecheck::typecheck;
 
 #[test]
 fn test_atom_types() {
@@ -36,8 +36,8 @@ fn test_let_in_types() {
     assert_type_err(
         "let x: bool = 3 in false",
         TypeError::TypeMismatch {
-            found: Num,
-            expected: Bool,
+            found: Bool,
+            expected: Num,
         },
     );
 }
@@ -79,13 +79,13 @@ fn test_polymorphic_fn_types() {
     assert_type_ok(
         "fn x => fn y => 0",
         Fn(
-            Box::new(Tyvar("a".to_string())),
-            Box::new(Fn(Box::new(Tyvar("b".to_string())), Box::new(Num))),
+            Box::new(Tyvar("c".to_string())),
+            Box::new(Fn(Box::new(Tyvar("d".to_string())), Box::new(Num))),
         ),
     );
     assert_type_ok(
         "(fn x => fn y => 0) 5",
-        Fn(Box::new(Tyvar("b".to_string())), Box::new(Num)),
+        Fn(Box::new(Tyvar("f".to_string())), Box::new(Num)),
     );
 }
 
@@ -95,7 +95,7 @@ fn assert_type_ok(src: &str, ty: Type) {
     let ast = &mut Ast::new();
     let id = lower(ast, res);
     assert_eq!(
-        typecheck_expr(ast, id, &mut TypeEnv::new()).map(|(a, b)| a),
+        typecheck(ast, id, &mut TypeEnv::new()),
         Ok(ty),
         "{}",
         src
@@ -107,7 +107,7 @@ fn assert_type_err(src: &str, err: TypeError) {
     let ast = &mut Ast::new();
     let id = lower(ast, res);
     assert_eq!(
-        typecheck_expr(ast, id, &mut TypeEnv::new()),
+        typecheck(ast, id, &mut TypeEnv::new()),
         Err(err),
         "{}",
         src
