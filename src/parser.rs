@@ -209,6 +209,13 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
             prefix(1, just(Token::Minus), |_, body, e| {
                 PExpr::Neg(Box::new(body)).with_span(e.span())
             }),
+            infix(
+                left(0),
+                just(Token::Semicolon).map_with(|_, e| e.span()),
+                |l, op, r, e| {
+                    PExpr::Seq(Box::new(l), Box::new(r)).with_span(e.span())
+                },
+            ),
         ))
     })
 }
