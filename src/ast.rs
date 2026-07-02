@@ -1,4 +1,4 @@
-use chumsky::span::{Spanned};
+use chumsky::span::{SpanWrap, Spanned};
 use im::HashMap;
 use std::fmt;
 use chumsky::prelude::SimpleSpan;
@@ -83,8 +83,11 @@ pub type Scheme = (Vec<String>, Type);
 
 #[derive(Debug, Clone)]
 pub enum Decl<'src> {
-    Let(String, Type, Spanned<PExpr<'src>>),
-    LetRec(String, Type, Spanned<PExpr<'src>>),
+    Let(
+        Spanned<&'src str>, Option<Type>,
+        Vec<(Spanned<&'src str>, Option<Type>)>,
+        Box<Spanned<PExpr<'src>>>,
+    ),
     Expr(Spanned<PExpr<'src>>),
 }
 
@@ -110,12 +113,12 @@ pub enum PExpr<'src> {
     Unit,
     If(Box<Spanned<Self>>, Box<Spanned<Self>>, Box<Spanned<Self>>),
     LetIn(
-        Spanned<&'src str>,
-        Option<Type>,
+        Spanned<&'src str>, Option<Type>,
+        Vec<(Spanned<&'src str>, Option<Type>)>,
         Box<Spanned<Self>>,
         Box<Spanned<Self>>,
     ),
-    Fn(Spanned<&'src str>, Option<Type>, Box<Spanned<Self>>),
+    Fn(Vec<(Spanned<&'src str>, Option<Type>)>, Box<Spanned<Self>>),
     App(Box<Spanned<Self>>, Box<Spanned<Self>>),
     Seq(Box<Spanned<Self>>, Box<Spanned<Self>>),
     Neg(Box<Spanned<Self>>),
@@ -179,14 +182,23 @@ pub fn lower<'src>(ast: &mut Ast<'src>, p: Spanned<PExpr<'src>>) -> ExprId {
             let id3 = lower(ast, *e3);
             ast.push(Expr::If(id1, id2, id3), to_code_loc(p.span))
         }
-        LetIn(v, ty, e1, e2) => {
-            let id1 = lower(ast, *e1);
+        LetIn(v, ty, args, e1, e2) => {
+            let id1 = lower(ast, *e1.clone());
             let id2 = lower(ast, *e2);
-            ast.push(Expr::LetIn(v.inner, ty, id1, id2), to_code_loc(p.span))
+            if args.is_empty() {
+                ast.push(Expr::LetIn(v.inner, ty, id1, id2), to_code_loc(p.span))
+            } else {
+                let desugared_fn = lower(ast, Fn(args, e1).with_span(p.span));
+                ast.push(Expr::LetIn(v.inner, ty, desugared_fn, id2), to_code_loc(p.span))
+            }
         }
-        Fn(v, ty, e1) => {
-            let id1 = lower(ast, *e1);
-            ast.push(Expr::Fn(v.inner, ty, id1), to_code_loc(p.span))
+        Fn(vs, e1) => {
+            let mut curr = lower(ast, *e1);
+            for (v, ty) in vs.iter().rev() {
+                let f = Expr::Fn(v.inner, ty.clone(), curr);
+                curr = ast.push(f, to_code_loc(p.span));
+            }
+            curr
         }
         App(e1, e2) => {
             let id1 = lower(ast, *e1);

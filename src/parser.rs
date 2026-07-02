@@ -1,4 +1,4 @@
-use crate::ast::{BinOp, PExpr, Token, Type};
+use crate::ast::{BinOp, Decl, PExpr, Token, Type};
 use ariadne::{sources, Color, Label, Report, ReportKind};
 use chumsky::input::MappedInput;
 use chumsky::pratt::{infix, left, prefix};
@@ -53,11 +53,49 @@ fn lexer<'src>(
                 .as_context()
                 .map(Token::Parens),
         ))
-        .spanned()
-        .padded()
+            .spanned()
+            .padded()
     })
-    .repeated()
-    .collect()
+        .repeated()
+        .collect()
+}
+
+fn decl_parser<'tokens, 'src: 'tokens>() -> impl Parser<
+    'tokens,
+    MappedInput<'tokens, Token<'src>, SimpleSpan, &'tokens [Spanned<Token<'src>>]>,
+    Spanned<Decl<'src>>,
+    extra::Err<Rich<'tokens, Token<'src>>>,
+> {
+    let ident = select_ref! { Token::Ident(x) => *x };
+    let parse_type = recursive(|typ| {
+        choice((
+            just(Token::Ident("num")).to(Type::Num),
+            just(Token::Ident("bool")).to(Type::Bool),
+            just(Token::Ident("unit")).to(Type::Unit),
+            just(Token::SingleQuote)
+                .ignore_then(ident.clone())
+                .map(|s| Type::Tyvar(s.to_string())),
+            typ.nested_in(select_ref! { Token::Parens(ts) = e => ts.split_spanned(e.span()) }),
+        ))
+            .pratt(infix(
+                left(1),
+                just(Token::ThinArrow).map_with(|_, e| e.span()),
+                |l, _, r, _| Type::Fn(Box::new(l), Box::new(r)),
+            ))
+    });
+    choice((
+        just(Token::Let)
+            .ignore_then(ident.spanned())
+            .then(just(Token::Colon).ignore_then(parse_type.clone()).or_not())
+            .then(ident.spanned().then(just(Token::Colon).ignore_then(parse_type.clone()).or_not()).repeated().collect::<Vec<_>>())
+            .then_ignore(just(Token::Eq))
+            .then(parser())
+            .map(|(((lhs, typ), vs), rhs)| {
+                Decl::Let(lhs, typ, vs, Box::new(rhs))
+            })
+            .spanned(),
+        parser().map(|e| Decl::Expr(e.clone()).with_span(e.span))
+    ))
 }
 
 fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
@@ -78,11 +116,11 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
                     .map(|s| Type::Tyvar(s.to_string())),
                 typ.nested_in(select_ref! { Token::Parens(ts) = e => ts.split_spanned(e.span()) }),
             ))
-            .pratt(infix(
-                left(1),
-                just(Token::ThinArrow).map_with(|_, e| e.span()),
-                |l, _, r, _| Type::Fn(Box::new(l), Box::new(r)),
-            ))
+                .pratt(infix(
+                    left(1),
+                    just(Token::ThinArrow).map_with(|_, e| e.span()),
+                    |l, _, r, _| Type::Fn(Box::new(l), Box::new(r)),
+                ))
         });
         let atom = choice((
             select_ref! { Token::Num(x) => PExpr::Num(*x) }.spanned(),
@@ -93,21 +131,21 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
             just(Token::Let)
                 .ignore_then(ident.spanned())
                 .then(just(Token::Colon).ignore_then(parse_type.clone()).or_not())
+                .then(ident.spanned().then(just(Token::Colon).ignore_then(parse_type.clone()).or_not()).repeated().collect::<Vec<_>>())
                 .then_ignore(just(Token::Eq))
                 .then(expr.clone())
                 .then_ignore(just(Token::In))
                 .then(expr.clone())
-                .map(|(((lhs, typ), rhs), then)| {
-                    PExpr::LetIn(lhs, typ, Box::new(rhs), Box::new(then))
+                .map(|((((lhs, typ), vs), rhs), then)| {
+                    PExpr::LetIn(lhs, typ, vs, Box::new(rhs), Box::new(then))
                 })
                 .spanned(),
             // fn x: typ => y
             just(Token::Fn)
-                .ignore_then(ident.spanned())
-                .then(just(Token::Colon).ignore_then(parse_type.clone()).or_not())
+                .ignore_then(ident.spanned().then(just(Token::Colon).ignore_then(parse_type.clone()).or_not()).repeated().at_least(1).collect::<Vec<_>>())
                 .then_ignore(just(Token::ThickArrow))
                 .then(expr.clone())
-                .map(|((lhs, typ), rhs)| PExpr::Fn(lhs, typ, Box::new(rhs)))
+                .map(|(vs, rhs)| PExpr::Fn(vs, Box::new(rhs)))
                 .spanned(),
             // if x then y else z
             just(Token::If)
@@ -124,7 +162,7 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
         ));
         atom.pratt((
             infix(
-                left(1),
+                left(2),
                 just(Token::Plus).map_with(|_, e| e.span()),
                 |l, op, r, e| {
                     PExpr::BinOp(BinOp::Plus.with_span(op), Box::new(l), Box::new(r))
@@ -132,7 +170,7 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
                 },
             ),
             infix(
-                left(1),
+                left(2),
                 just(Token::Minus).map_with(|_, e| e.span()),
                 |l, op, r, e| {
                     PExpr::BinOp(BinOp::Minus.with_span(op), Box::new(l), Box::new(r))
@@ -140,7 +178,7 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
                 },
             ),
             infix(
-                left(1),
+                left(3),
                 just(Token::Asterisk).map_with(|_, e| e.span()),
                 |l, op, r, e| {
                     PExpr::BinOp(BinOp::Times.with_span(op), Box::new(l), Box::new(r))
@@ -148,7 +186,7 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
                 },
             ),
             infix(
-                left(1),
+                left(3),
                 just(Token::Slash).map_with(|_, e| e.span()),
                 |l, op, r, e| {
                     PExpr::BinOp(BinOp::Div.with_span(op), Box::new(l), Box::new(r))
@@ -203,10 +241,10 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
                         .with_span(e.span())
                 },
             ),
-            infix(left(1), empty(), |l, _, r, e| {
+            infix(left(10), empty(), |l, _, r, e| {
                 PExpr::App(Box::new(l), Box::new(r)).with_span(e.span())
             }),
-            prefix(1, just(Token::Minus), |_, body, e| {
+            prefix(2, just(Token::Minus), |_, body, e| {
                 PExpr::Neg(Box::new(body)).with_span(e.span())
             }),
             infix(

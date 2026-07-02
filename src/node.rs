@@ -26,6 +26,5 @@ pub fn run1(src: &str) -> (Type, String) {
 }
 
 pub fn run(src: &str) -> String {
-    let (_, e) = run1(src);
-    e
+    run1(src).1
 }
