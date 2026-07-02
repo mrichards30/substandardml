@@ -1,4 +1,4 @@
-use crate::ast::{BinOp, Decl, PExpr, Token, Type};
+use crate::ast::{BinOp, Decl, PExpr, Pattern, Token, Type};
 use ariadne::{sources, Color, Label, Report, ReportKind};
 use chumsky::input::MappedInput;
 use chumsky::pratt::{infix, left, prefix};
@@ -22,9 +22,13 @@ fn lexer<'src>(
                 "if" => Token::If,
                 "then" => Token::Then,
                 "else" => Token::Else,
-                s => Token::Ident(s),
+                "match" => Token::Match,
+                "with" => Token::With,
+                s if is_first_letter_lowercase(s) => Token::LIdent(s),
+                s => Token::UIdent(s),
             }),
             // Operators
+            just("_").to(Token::Underscore),
             just("=>").to(Token::ThickArrow),
             just("->").to(Token::ThinArrow),
             just("'").to(Token::SingleQuote),
@@ -60,18 +64,22 @@ fn lexer<'src>(
         .collect()
 }
 
+fn is_first_letter_lowercase(s: &str) -> bool {
+    s.chars().next().map_or(false, |c| c.is_lowercase())
+}
+
 fn decl_parser<'tokens, 'src: 'tokens>() -> impl Parser<
     'tokens,
     MappedInput<'tokens, Token<'src>, SimpleSpan, &'tokens [Spanned<Token<'src>>]>,
     Spanned<Decl<'src>>,
     extra::Err<Rich<'tokens, Token<'src>>>,
 > {
-    let ident = select_ref! { Token::Ident(x) => *x };
+    let ident = select_ref! { Token::LIdent(x) => *x };
     let parse_type = recursive(|typ| {
         choice((
-            just(Token::Ident("num")).to(Type::Num),
-            just(Token::Ident("bool")).to(Type::Bool),
-            just(Token::Ident("unit")).to(Type::Unit),
+            just(Token::LIdent("num")).to(Type::Num),
+            just(Token::LIdent("bool")).to(Type::Bool),
+            just(Token::LIdent("unit")).to(Type::Unit),
             just(Token::SingleQuote)
                 .ignore_then(ident.clone())
                 .map(|s| Type::Tyvar(s.to_string())),
@@ -105,12 +113,13 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
     extra::Err<Rich<'tokens, Token<'src>>>,
 > {
     recursive(|expr| {
-        let ident = select_ref! { Token::Ident(x) => *x };
+        let ident = select_ref! { Token::LIdent(x) => *x };
+        let upper_ident = select_ref! { Token::UIdent(x) => *x };
         let parse_type = recursive(|typ| {
             choice((
-                just(Token::Ident("num")).to(Type::Num),
-                just(Token::Ident("bool")).to(Type::Bool),
-                just(Token::Ident("unit")).to(Type::Unit),
+                just(Token::LIdent("num")).to(Type::Num),
+                just(Token::LIdent("bool")).to(Type::Bool),
+                just(Token::LIdent("unit")).to(Type::Unit),
                 just(Token::SingleQuote)
                     .ignore_then(ident.clone())
                     .map(|s| Type::Tyvar(s.to_string())),
@@ -121,6 +130,20 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
                     just(Token::ThinArrow).map_with(|_, e| e.span()),
                     |l, _, r, _| Type::Fn(Box::new(l), Box::new(r)),
                 ))
+        });
+        let parse_pattern = recursive(|pat| {
+            let atom = choice((
+                select_ref! { Token::Num(x) => Pattern::Num(*x) }.spanned(),
+                just(Token::True).to(Pattern::Bool(true)).spanned(),
+                just(Token::False).to(Pattern::Bool(false)).spanned(),
+                just(Token::Underscore).to(Pattern::Wildcard).spanned(),
+                ident.map(|s| Pattern::Var(s)).spanned(),
+                pat.nested_in(select_ref! { Token::Parens(ts) = e => ts.split_spanned(e.span()) })
+            ));
+            let constructor = upper_ident.then(atom.clone().repeated().collect::<Vec<_>>())
+                .map(|(x, ps)| Pattern::Constructor(x, ps))
+                .spanned();
+            choice((atom, constructor))
         });
         let atom = choice((
             select_ref! { Token::Num(x) => PExpr::Num(*x) }.spanned(),
@@ -156,6 +179,15 @@ fn parser<'tokens, 'src: 'tokens>() -> impl Parser<
                 .then(expr.clone())
                 .map(|((cond, then_), else_)| {
                     PExpr::If(Box::new(cond), Box::new(then_), Box::new(else_))
+                })
+                .spanned(),
+            just(Token::Match)
+                .ignore_then(expr.clone())
+                .then_ignore(just(Token::With))
+                .then((parse_pattern.then_ignore(just(Token::ThickArrow)).then(expr.clone()))
+                    .repeated().at_least(1).collect::<Vec<_>>())
+                .map(|(x, branches)| {
+                    PExpr::Match(Box::new(x), branches)
                 })
                 .spanned(),
             expr.nested_in(select_ref! { Token::Parens(ts) = e => ts.split_spanned(e.span()) }),

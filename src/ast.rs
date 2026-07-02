@@ -5,7 +5,8 @@ use chumsky::prelude::SimpleSpan;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token<'src> {
-    Ident(&'src str),
+    LIdent(&'src str),
+    UIdent(&'src str),
     Num(f64),
     Parens(Vec<Spanned<Self>>),
     Colon,
@@ -25,6 +26,7 @@ pub enum Token<'src> {
     ThickArrow,
     ThinArrow,
     SingleQuote,
+    Underscore,
 
     // Keywords
     Let,
@@ -35,12 +37,15 @@ pub enum Token<'src> {
     If,
     Then,
     Else,
+    Match,
+    With,
 }
 
 impl fmt::Display for Token<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Token::Ident(x) => write!(f, "{x}"),
+            Token::LIdent(x) => write!(f, "{x}"),
+            Token::UIdent(x) => write!(f, "{x}"),
             Token::Num(x) => write!(f, "{x}"),
             Token::Parens(_) => write!(f, "(...)"),
             Token::Colon => write!(f, ":"),
@@ -66,6 +71,9 @@ impl fmt::Display for Token<'_> {
             Token::ThickArrow => write!(f, "=>"),
             Token::ThinArrow => write!(f, "->"),
             Token::SingleQuote => write!(f, "'"),
+            Token::Underscore => write!(f, "_"),
+            Token::Match => write!(f, "match"),
+            Token::With => write!(f, "with"),
         }
     }
 }
@@ -123,6 +131,19 @@ pub enum PExpr<'src> {
     Seq(Box<Spanned<Self>>, Box<Spanned<Self>>),
     Neg(Box<Spanned<Self>>),
     BinOp(Spanned<BinOp>, Box<Spanned<Self>>, Box<Spanned<Self>>),
+    Match(Box<Spanned<Self>>, Vec<(Spanned<Pattern<'src>>, Spanned<Self>)>),
+}
+
+#[derive(Debug, Clone)]
+pub enum Pattern<'src> {
+    Constructor(&'src str, Vec<Spanned<Self>>),
+    Num(f64),
+    Range(f64, f64),
+    Var(&'src str),
+    Bool(bool),
+    Unit,
+    Wildcard,
+    Or(Vec<Spanned<Self>>),
 }
 
 pub type ExprId = usize;
@@ -219,6 +240,7 @@ pub fn lower<'src>(ast: &mut Ast<'src>, p: Spanned<PExpr<'src>>) -> ExprId {
             let id2 = lower(ast, *e2);
             ast.push(Expr::BinOp(op.inner, id1, id2), to_code_loc(p.span))
         }
+        Match(x, bs) => ast.push(Expr::Unit, to_code_loc(p.span)),
     }
 }
 
